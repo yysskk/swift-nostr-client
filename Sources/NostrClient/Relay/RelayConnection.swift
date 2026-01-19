@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Represents the connection state of a relay
 public enum RelayConnectionState: Sendable, Equatable {
