@@ -7,6 +7,7 @@ A modern Swift library for the Nostr protocol, built with Swift 6 concurrency su
 - **Full NIP-01 Support**: Events, subscriptions, and relay communication
 - **NIP-02 Contact List**: Follow/unfollow users and manage contact lists
 - **NIP-03 OpenTimestamps**: Attach OTS attestations to events
+- **NIP-05 Verification**: DNS-based identifier verification
 - **NIP-17 Private DMs**: End-to-end encrypted direct messages with sender anonymity
 - **Cryptographic Operations**: Schnorr signatures with secp256k1
 - **Bech32 Encoding**: npub/nsec key encoding (NIP-19)
@@ -225,6 +226,7 @@ let isValid = try signed.verify()
 - [x] NIP-01: Basic protocol
 - [x] NIP-02: Contact list and petnames
 - [x] NIP-03: OpenTimestamps attestations
+- [x] NIP-05: DNS-based identifiers
 - [x] NIP-17: Private direct messages
 - [x] NIP-19: bech32-encoded entities (npub, nsec)
 - [x] NIP-20: Command Results (OK)
