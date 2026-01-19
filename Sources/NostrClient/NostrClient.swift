@@ -179,6 +179,81 @@ public actor NostrClient {
         try await relayPool.publish(event)
     }
 
+    // MARK: - Private Direct Messages (NIP-17)
+
+    /// Sends a private direct message to a recipient using NIP-17
+    /// - Parameters:
+    ///   - content: The message content
+    ///   - recipientPubkey: The recipient's public key (hex)
+    ///   - subject: Optional conversation subject
+    ///   - replyTo: Optional event ID to reply to
+    /// - Returns: The published gift-wrapped event
+    public func sendDirectMessage(
+        _ content: String,
+        to recipientPubkey: String,
+        subject: String? = nil,
+        replyTo: String? = nil
+    ) async throws -> Event {
+        guard let keyPair = try? getKeyPair() else {
+            throw NostrError.signingFailed
+        }
+
+        let builder = DirectMessageBuilder(keyPair: keyPair)
+        let giftWrap = try builder.createMessage(
+            content: content,
+            to: recipientPubkey,
+            subject: subject,
+            replyTo: replyTo
+        )
+
+        try await relayPool.publish(giftWrap)
+        return giftWrap
+    }
+
+    /// Parses a received gift-wrapped direct message
+    /// - Parameter giftWrap: The gift-wrapped event
+    /// - Returns: The parsed DirectMessage
+    public func parseDirectMessage(_ giftWrap: Event) throws -> DirectMessage {
+        guard let keyPair = try? getKeyPair() else {
+            throw NostrError.signingFailed
+        }
+
+        let parser = DirectMessageParser(keyPair: keyPair)
+        return try parser.parse(giftWrap)
+    }
+
+    /// Subscribes to private direct messages for the current user
+    /// - Parameters:
+    ///   - limit: Maximum number of messages to fetch
+    ///   - handler: Handler called for each gift-wrapped event
+    /// - Returns: The subscription ID
+    @discardableResult
+    public func subscribeToDirectMessages(
+        limit: Int = 100,
+        handler: @escaping @Sendable (Event) -> Void
+    ) async throws -> String {
+        guard let publicKey = publicKey else {
+            throw NostrError.signingFailed
+        }
+
+        // Subscribe to gift-wrapped events addressed to us
+        let filter = Filter(
+            kinds: [Event.Kind.giftWrap.rawValue],
+            pubkeyReferences: [publicKey],
+            limit: limit
+        )
+
+        return try await subscribe(filters: [filter], handler: handler)
+    }
+
+    /// Helper to get the keypair from the signer
+    private func getKeyPair() throws -> KeyPair {
+        guard let signer = signer else {
+            throw NostrError.signingFailed
+        }
+        return signer.keyPair
+    }
+
     // MARK: - Subscriptions
 
     /// Subscribes to events matching the given filters

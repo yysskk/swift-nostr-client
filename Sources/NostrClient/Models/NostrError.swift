@@ -19,6 +19,12 @@ public enum NostrError: Error, LocalizedError, Sendable, Equatable {
     case invalidHex
     case invalidBech32
     case unknownPrefix(String)
+    case encryptionFailed
+    case decryptionFailed
+    case unsupportedEncryptionVersion(UInt8)
+    case invalidPayloadFormat
+    case hmacVerificationFailed
+    case invalidPadding
 
     public var errorDescription: String? {
         switch self {
@@ -56,6 +62,18 @@ public enum NostrError: Error, LocalizedError, Sendable, Equatable {
             return "Invalid bech32 encoding"
         case .unknownPrefix(let prefix):
             return "Unknown bech32 prefix: \(prefix)"
+        case .encryptionFailed:
+            return "Encryption failed"
+        case .decryptionFailed:
+            return "Decryption failed"
+        case .unsupportedEncryptionVersion(let version):
+            return "Unsupported encryption version: \(version)"
+        case .invalidPayloadFormat:
+            return "Invalid encrypted payload format"
+        case .hmacVerificationFailed:
+            return "HMAC verification failed"
+        case .invalidPadding:
+            return "Invalid message padding"
         }
     }
 }

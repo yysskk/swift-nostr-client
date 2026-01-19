@@ -87,6 +87,11 @@ public extension Event {
         case badgeDefinition = 30009
         case longFormContent = 30023
         case applicationSpecificData = 30078
+
+        // NIP-17 Private Direct Messages
+        case privateDirectMessage = 14
+        case seal = 13
+        case giftWrap = 1059
     }
 }
 

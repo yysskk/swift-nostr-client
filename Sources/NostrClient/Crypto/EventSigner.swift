@@ -4,7 +4,7 @@ import P256K
 
 /// Handles signing and verification of Nostr events
 public struct EventSigner: Sendable {
-    private let keyPair: KeyPair
+    let keyPair: KeyPair
 
     public init(keyPair: KeyPair) {
         self.keyPair = keyPair
