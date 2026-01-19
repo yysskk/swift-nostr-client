@@ -1,0 +1,61 @@
+import Foundation
+
+/// Errors that can occur in the Nostr client
+public enum NostrError: Error, LocalizedError, Sendable, Equatable {
+    case invalidPrivateKey
+    case invalidPublicKey
+    case invalidSignature
+    case invalidEventId
+    case signingFailed
+    case verificationFailed
+    case serializationFailed
+    case invalidData
+    case invalidMessageFormat
+    case connectionFailed(String)
+    case notConnected
+    case subscriptionNotFound(String)
+    case relayError(String)
+    case timeout
+    case invalidHex
+    case invalidBech32
+    case unknownPrefix(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidPrivateKey:
+            return "Invalid private key"
+        case .invalidPublicKey:
+            return "Invalid public key"
+        case .invalidSignature:
+            return "Invalid signature"
+        case .invalidEventId:
+            return "Invalid event ID"
+        case .signingFailed:
+            return "Failed to sign event"
+        case .verificationFailed:
+            return "Signature verification failed"
+        case .serializationFailed:
+            return "Failed to serialize data"
+        case .invalidData:
+            return "Invalid data"
+        case .invalidMessageFormat:
+            return "Invalid message format"
+        case .connectionFailed(let reason):
+            return "Connection failed: \(reason)"
+        case .notConnected:
+            return "Not connected to relay"
+        case .subscriptionNotFound(let id):
+            return "Subscription not found: \(id)"
+        case .relayError(let message):
+            return "Relay error: \(message)"
+        case .timeout:
+            return "Operation timed out"
+        case .invalidHex:
+            return "Invalid hexadecimal string"
+        case .invalidBech32:
+            return "Invalid bech32 encoding"
+        case .unknownPrefix(let prefix):
+            return "Unknown bech32 prefix: \(prefix)"
+        }
+    }
+}
