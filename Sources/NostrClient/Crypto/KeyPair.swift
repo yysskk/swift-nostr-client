@@ -54,6 +54,40 @@ public struct KeyPair: Sendable {
         try self.init(privateKey: data)
     }
 
+    /// Creates a keypair from a BIP-39 mnemonic phrase (NIP-06)
+    /// Uses derivation path: m/44'/1237'/<account>'/0/0
+    /// - Parameters:
+    ///   - mnemonic: The BIP-39 mnemonic phrase
+    ///   - passphrase: Optional passphrase for additional security
+    ///   - account: The account index (default 0)
+    public init(mnemonic: Mnemonic, passphrase: String = "", account: UInt32 = 0) throws {
+        let seed = mnemonic.toSeed(passphrase: passphrase)
+        let privateKey = try KeyDerivation.deriveNostrKey(seed: seed, account: account)
+        try self.init(privateKey: privateKey)
+    }
+
+    /// Creates a keypair from a mnemonic phrase string (NIP-06)
+    /// Uses derivation path: m/44'/1237'/<account>'/0/0
+    /// - Parameters:
+    ///   - mnemonicPhrase: The BIP-39 mnemonic phrase as a space-separated string
+    ///   - passphrase: Optional passphrase for additional security
+    ///   - account: The account index (default 0)
+    public init(mnemonicPhrase: String, passphrase: String = "", account: UInt32 = 0) throws {
+        let mnemonic = try Mnemonic(phrase: mnemonicPhrase)
+        try self.init(mnemonic: mnemonic, passphrase: passphrase, account: account)
+    }
+
+    /// Generates a new keypair with a random mnemonic (NIP-06)
+    /// - Parameters:
+    ///   - wordCount: Number of words in the mnemonic (12, 15, 18, 21, or 24)
+    ///   - passphrase: Optional passphrase for additional security
+    /// - Returns: A tuple containing the generated mnemonic and keypair
+    public static func generate(wordCount: Int = 12, passphrase: String = "") throws -> (mnemonic: Mnemonic, keyPair: KeyPair) {
+        let mnemonic = try Mnemonic.generate(wordCount: wordCount)
+        let keyPair = try KeyPair(mnemonic: mnemonic, passphrase: passphrase)
+        return (mnemonic, keyPair)
+    }
+
     /// Returns the private key as nsec (bech32 encoded)
     public var nsec: String {
         Bech32.encode(hrp: "nsec", data: privateKey)

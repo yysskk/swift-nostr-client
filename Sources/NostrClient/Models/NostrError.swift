@@ -25,6 +25,9 @@ public enum NostrError: Error, LocalizedError, Sendable, Equatable {
     case invalidPayloadFormat
     case hmacVerificationFailed
     case invalidPadding
+    case invalidMnemonic
+    case invalidMnemonicWord(String)
+    case invalidMnemonicChecksum
 
     public var errorDescription: String? {
         switch self {
@@ -74,6 +77,12 @@ public enum NostrError: Error, LocalizedError, Sendable, Equatable {
             return "HMAC verification failed"
         case .invalidPadding:
             return "Invalid message padding"
+        case .invalidMnemonic:
+            return "Invalid mnemonic phrase"
+        case .invalidMnemonicWord(let word):
+            return "Invalid mnemonic word: \(word)"
+        case .invalidMnemonicChecksum:
+            return "Invalid mnemonic checksum"
         }
     }
 }

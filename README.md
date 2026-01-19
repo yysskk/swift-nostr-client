@@ -8,6 +8,7 @@ A modern Swift library for the Nostr protocol, built with Swift 6 concurrency su
 - **NIP-02 Contact List**: Follow/unfollow users and manage contact lists
 - **NIP-03 OpenTimestamps**: Attach OTS attestations to events
 - **NIP-05 Verification**: DNS-based identifier verification
+- **NIP-06 Key Derivation**: Generate keys from BIP-39 mnemonic seed phrases
 - **NIP-17 Private DMs**: End-to-end encrypted direct messages with sender anonymity
 - **Cryptographic Operations**: Schnorr signatures with secp256k1
 - **Bech32 Encoding**: npub/nsec key encoding (NIP-19)
@@ -41,7 +42,7 @@ Or add via Xcode: File → Add Package Dependencies → Enter repository URL.
 ```swift
 import NostrClient
 
-// Generate a new keypair
+// Generate a new random keypair
 let keyPair = try KeyPair()
 print("Public Key: \(keyPair.publicKeyHex)")
 print("npub: \(keyPair.npub)")
@@ -49,6 +50,14 @@ print("nsec: \(keyPair.nsec)")
 
 // Import from nsec
 let imported = try KeyPair(nsec: "nsec1...")
+
+// Generate from mnemonic (NIP-06)
+let (mnemonic, keyPairFromMnemonic) = try KeyPair.generate(wordCount: 12)
+print("Mnemonic: \(mnemonic.phrase)")
+print("Public Key: \(keyPairFromMnemonic.npub)")
+
+// Restore from existing mnemonic
+let restored = try KeyPair(mnemonicPhrase: "leader monkey parrot ring guide accident before fence cannon height naive bean")
 ```
 
 ### Connect to Relays
@@ -227,6 +236,7 @@ let isValid = try signed.verify()
 - [x] NIP-02: Contact list and petnames
 - [x] NIP-03: OpenTimestamps attestations
 - [x] NIP-05: DNS-based identifiers
+- [x] NIP-06: Basic key derivation from mnemonic seed phrase
 - [x] NIP-17: Private direct messages
 - [x] NIP-19: bech32-encoded entities (npub, nsec)
 - [x] NIP-20: Command Results (OK)
