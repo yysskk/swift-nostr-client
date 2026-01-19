@@ -5,6 +5,7 @@ A modern Swift library for the Nostr protocol, built with Swift 6 concurrency su
 ## Features
 
 - **Full NIP-01 Support**: Events, subscriptions, and relay communication
+- **NIP-02 Contact List**: Follow/unfollow users and manage contact lists
 - **Cryptographic Operations**: Schnorr signatures with secp256k1
 - **Bech32 Encoding**: npub/nsec key encoding (NIP-19)
 - **Async/Await**: Modern Swift concurrency with actors
@@ -218,6 +219,7 @@ let isValid = try signed.verify()
 ## Supported NIPs
 
 - [x] NIP-01: Basic protocol
+- [x] NIP-02: Contact list and petnames
 - [x] NIP-19: bech32-encoded entities (npub, nsec)
 - [x] NIP-20: Command Results (OK)
 - [x] NIP-42: Authentication (AUTH message parsing)

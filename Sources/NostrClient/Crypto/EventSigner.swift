@@ -1,5 +1,5 @@
 import Foundation
-import CryptoKit
+import Crypto
 import P256K
 
 /// Handles signing and verification of Nostr events
@@ -123,6 +123,24 @@ public struct EventSigner: Sendable {
             content: reason
         )
         return try sign(unsigned)
+    }
+
+    /// Creates and signs a contact list event (kind 3, NIP-02)
+    public func signContactList(_ contacts: [Contact]) throws -> Event {
+        let tags = contacts.map { $0.toTag() }
+        let unsigned = UnsignedEvent(
+            pubkey: publicKey,
+            kind: .contacts,
+            tags: tags,
+            content: ""
+        )
+        return try sign(unsigned)
+    }
+
+    /// Creates and signs a contact list event from pubkeys
+    public func signContactList(pubkeys: [String]) throws -> Event {
+        let contacts = pubkeys.map { Contact(pubkey: $0) }
+        return try signContactList(contacts)
     }
 }
 

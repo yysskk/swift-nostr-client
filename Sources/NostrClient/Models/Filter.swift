@@ -177,4 +177,21 @@ public extension Filter {
             limit: limit
         )
     }
+
+    /// Create a filter for contact lists of specific users (NIP-02)
+    static func contactList(pubkeys: [String]) -> Filter {
+        Filter(
+            authors: pubkeys,
+            kinds: [Event.Kind.contacts.rawValue]
+        )
+    }
+
+    /// Create a filter for a specific user's contact list (NIP-02)
+    static func contactList(pubkey: String) -> Filter {
+        Filter(
+            authors: [pubkey],
+            kinds: [Event.Kind.contacts.rawValue],
+            limit: 1
+        )
+    }
 }

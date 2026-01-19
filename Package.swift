@@ -18,12 +18,14 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/GigaBitcoin/secp256k1.swift", from: "0.18.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "4.2.0"),
     ],
     targets: [
         .target(
             name: "NostrClient",
             dependencies: [
                 .product(name: "P256K", package: "secp256k1.swift"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
         .testTarget(
