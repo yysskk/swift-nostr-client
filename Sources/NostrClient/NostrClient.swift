@@ -14,15 +14,8 @@ public actor NostrClient {
     /// Active subscriptions
     private var subscriptions: [String: Subscription] = [:]
 
-    /// Event cache for deduplication
-    private var eventCache: Set<String> = []
-
-    /// Maximum cache size
-    private let maxCacheSize: Int
-
-    public init(maxCacheSize: Int = 10000) {
-        self.relayPool = RelayPool()
-        self.maxCacheSize = maxCacheSize
+    public init(relayPoolConfig: RelayPoolConfig = .default) {
+        self.relayPool = RelayPool(config: relayPoolConfig)
     }
 
     /// Sets the signer for publishing events
@@ -188,6 +181,7 @@ public actor NostrClient {
     ///   - subject: Optional conversation subject
     ///   - replyTo: Optional event ID to reply to
     /// - Returns: The published gift-wrapped event
+    @discardableResult
     public func sendDirectMessage(
         _ content: String,
         to recipientPubkey: String,
@@ -284,15 +278,15 @@ public actor NostrClient {
     }
 
     /// Unsubscribes from a subscription
-    public func unsubscribe(subscriptionId: String) async throws {
+    public func unsubscribe(subscriptionId: String) async {
         subscriptions.removeValue(forKey: subscriptionId)
-        try await relayPool.unsubscribe(subscriptionId: subscriptionId)
+        await relayPool.unsubscribe(subscriptionId: subscriptionId)
     }
 
     /// Unsubscribes from all subscriptions
-    public func unsubscribeAll() async throws {
+    public func unsubscribeAll() async {
         for subscriptionId in subscriptions.keys {
-            try await relayPool.unsubscribe(subscriptionId: subscriptionId)
+            await relayPool.unsubscribe(subscriptionId: subscriptionId)
         }
         subscriptions.removeAll()
     }
@@ -355,7 +349,7 @@ public actor NostrClient {
 
         // Wait for EOSE or timeout
         try await Task.sleep(for: .seconds(timeout))
-        try await unsubscribe(subscriptionId: subscriptionId)
+        await unsubscribe(subscriptionId: subscriptionId)
 
         return await collectedEvents.events
     }
@@ -386,15 +380,7 @@ public actor NostrClient {
 
         switch message {
         case .event(_, let event):
-            // Deduplicate events
-            guard !eventCache.contains(event.id) else { return }
-
-            // Manage cache size
-            if eventCache.count >= maxCacheSize {
-                eventCache.removeAll()
-            }
-            eventCache.insert(event.id)
-
+            // Note: Deduplication is now handled at the RelayPool level
             subscription.handler(event)
 
         case .endOfStoredEvents:
@@ -403,6 +389,11 @@ public actor NostrClient {
         default:
             break
         }
+    }
+
+    /// Clears the event deduplication cache in the relay pool
+    public func clearDeduplicationCache() async {
+        await relayPool.clearDeduplicationCache()
     }
 }
 
