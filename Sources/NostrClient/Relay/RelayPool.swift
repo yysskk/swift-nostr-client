@@ -20,6 +20,12 @@ public actor RelayPool {
     /// Last cache cleanup time
     private var lastCacheCleanup: Date = Date()
 
+    /// Monitoring tasks for relay reconnection (keyed by relay URL)
+    private var monitoringTasks: [URL: Task<Void, Never>] = [:]
+
+    /// Message listener tasks for subscriptions (keyed by subscription ID)
+    private var subscriptionTasks: [String: [Task<Void, Never>]] = [:]
+
     public init(config: RelayPoolConfig = .default) {
         self.config = config
     }
@@ -47,9 +53,11 @@ public actor RelayPool {
 
     /// Sets up monitoring for relay reconnection to resubscribe
     private func setupReconnectionMonitoring(for connection: RelayConnection) {
-        Task {
+        let url = connection.url
+        let task = Task {
             var wasConnected = false
             for await state in await connection.stateChanges() {
+                guard !Task.isCancelled else { break }
                 switch state {
                 case .connected:
                     if wasConnected {
@@ -64,6 +72,7 @@ public actor RelayPool {
                 }
             }
         }
+        monitoringTasks[url] = task
     }
 
     /// Resubscribes to all active subscriptions on a reconnected relay
@@ -79,6 +88,10 @@ public actor RelayPool {
 
     /// Removes a relay from the pool
     public func removeRelay(url: URL) async {
+        // Cancel monitoring task first
+        monitoringTasks[url]?.cancel()
+        monitoringTasks.removeValue(forKey: url)
+
         if let connection = relays[url] {
             await connection.disconnect()
             relays.removeValue(forKey: url)
@@ -121,6 +134,20 @@ public actor RelayPool {
 
     /// Disconnects from all relays in the pool
     public func disconnectAll() async {
+        // Cancel all monitoring tasks
+        for task in monitoringTasks.values {
+            task.cancel()
+        }
+        monitoringTasks.removeAll()
+
+        // Cancel all subscription listener tasks
+        for tasks in subscriptionTasks.values {
+            for task in tasks {
+                task.cancel()
+            }
+        }
+        subscriptionTasks.removeAll()
+
         await withTaskGroup(of: Void.self) { group in
             for connection in relays.values {
                 group.addTask {
@@ -180,23 +207,23 @@ public actor RelayPool {
 
         // Start listening for messages BEFORE sending subscription request
         // This ensures we don't miss any events that arrive immediately after subscribing
-        let capturedSubscriptionId = subscriptionId
+        var tasks: [Task<Void, Never>] = []
         for connection in relays.values {
-            Task { [weak self] in
+            let task = Task {
                 for await message in await connection.messages() {
-                    guard let self else { return }
+                    guard !Task.isCancelled else { break }
                     switch message {
-                    case .event(let subId, let event) where subId == capturedSubscriptionId:
+                    case .event(let subId, let event) where subId == subscriptionId:
                         // Deduplicate events across relays
                         let isDuplicate = await self.isDuplicateEvent(eventId: event.id)
                         if !isDuplicate {
                             await self.markEventAsSeen(eventId: event.id)
-                            if let currentHandler = await self.subscriptionHandlers[capturedSubscriptionId] {
+                            if let currentHandler = await self.subscriptionHandlers[subscriptionId] {
                                 currentHandler(message)
                             }
                         }
-                    case .endOfStoredEvents(let subId) where subId == capturedSubscriptionId:
-                        if let currentHandler = await self.subscriptionHandlers[capturedSubscriptionId] {
+                    case .endOfStoredEvents(let subId) where subId == subscriptionId:
+                        if let currentHandler = await self.subscriptionHandlers[subscriptionId] {
                             currentHandler(message)
                         }
                     default:
@@ -204,10 +231,12 @@ public actor RelayPool {
                     }
                 }
             }
+            tasks.append(task)
         }
+        subscriptionTasks[subscriptionId] = tasks
 
-        // Small delay to ensure message streams are set up
-        try await Task.sleep(for: .milliseconds(10))
+        // Yield to allow message-stream tasks to start before subscribing
+        await Task.yield()
 
         // Now send subscription requests to all relays, tolerating failures
         var successCount = 0
@@ -243,6 +272,12 @@ public actor RelayPool {
     public func unsubscribe(subscriptionId: String) async {
         subscriptionHandlers.removeValue(forKey: subscriptionId)
         subscriptionFilters.removeValue(forKey: subscriptionId)
+
+        if let tasks = subscriptionTasks.removeValue(forKey: subscriptionId) {
+            for task in tasks {
+                task.cancel()
+            }
+        }
 
         await withTaskGroup(of: Void.self) { group in
             for connection in relays.values {

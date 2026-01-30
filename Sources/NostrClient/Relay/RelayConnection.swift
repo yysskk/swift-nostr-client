@@ -169,7 +169,11 @@ public actor RelayConnection {
             // Update state on send failure
             updateState(.failed(error.localizedDescription))
             scheduleReconnectIfNeeded()
-            throw NostrError.notConnected
+            if let nostrError = error as? NostrError {
+                throw nostrError
+            } else {
+                throw NostrError.notConnected
+            }
         }
 
         // Track subscription state
@@ -306,7 +310,10 @@ public actor RelayConnection {
                             throw NostrError.timeout
                         }
 
-                        let result = try await group.next()!
+                        guard let result = try await group.next() else {
+                            group.cancelAll()
+                            throw NostrError.timeout
+                        }
                         group.cancelAll()
                         return result
                     }
