@@ -156,11 +156,12 @@ public struct GiftWrap: Sendable {
         return try decoder.decode(Event.self, from: Data(json.utf8))
     }
 
-    /// Returns a randomized timestamp within +/- 2 days for privacy
+    /// Returns a randomized timestamp in the past (up to 2 days ago) for privacy.
+    /// Only past offset is used so relays that reject "created_at too late" will accept the event.
     private static func randomizedTimestamp() -> Int64 {
         let now = Int64(Date().timeIntervalSince1970)
         let twoDays: Int64 = 2 * 24 * 60 * 60
-        let randomOffset = Int64.random(in: -twoDays...twoDays)
+        let randomOffset = Int64.random(in: -twoDays...0)
         return now + randomOffset
     }
 }

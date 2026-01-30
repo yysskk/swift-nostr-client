@@ -3,15 +3,6 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Represents the connection state of a relay
-public enum RelayConnectionState: Sendable, Equatable {
-    case disconnected
-    case connecting
-    case connected
-    case disconnecting
-    case failed(String)
-}
-
 /// Manages a WebSocket connection to a single Nostr relay
 public actor RelayConnection {
     /// The relay URL
@@ -29,57 +20,161 @@ public actor RelayConnection {
     /// URL session for WebSocket connections
     private let urlSession: URLSession
 
-    /// Continuation for async message receiving
-    private var messageContinuation: AsyncStream<RelayMessage>.Continuation?
+    /// Connection configuration
+    public let config: RelayConnectionConfig
 
-    public init(url: URL, urlSession: URLSession = .shared) {
+    /// Current reconnection attempt count
+    private var reconnectAttempts: Int = 0
+
+    /// Current reconnect delay
+    private var currentReconnectDelay: TimeInterval = 1
+
+    /// Whether reconnection is in progress
+    private var isReconnecting: Bool = false
+
+    /// Reconnection task
+    private var reconnectTask: Task<Void, Never>?
+
+    /// Continuations for async message receiving (supports multiple consumers)
+    private var messageContinuations: [UUID: AsyncStream<RelayMessage>.Continuation] = [:]
+
+    /// Continuation for connection state changes
+    private var stateChangeContinuations: [UUID: AsyncStream<RelayConnectionState>.Continuation] = [:]
+
+    /// Pending continuations waiting for OK response after publish (keyed by event id)
+    private var pendingPublishWaiters: [String: CheckedContinuation<Void, Error>] = [:]
+
+    public init(url: URL, urlSession: URLSession = .shared, config: RelayConnectionConfig = .default) {
         self.url = url
         self.urlSession = urlSession
+        self.config = config
+        self.currentReconnectDelay = config.initialReconnectDelay
     }
 
-    public init(urlString: String) throws {
+    public init(urlString: String, config: RelayConnectionConfig = .default) throws {
         guard let url = URL(string: urlString) else {
             throw NostrError.connectionFailed("Invalid URL: \(urlString)")
         }
         self.url = url
         self.urlSession = .shared
+        self.config = config
+        self.currentReconnectDelay = config.initialReconnectDelay
     }
 
     /// Connects to the relay
     public func connect() async throws {
-        guard state == .disconnected || state != .connecting else { return }
+        guard state == .disconnected || state == .failed("") || {
+            if case .failed = state { return true }
+            return false
+        }() else { return }
 
-        state = .connecting
+        updateState(.connecting)
 
         var request = URLRequest(url: url)
         request.setValue("websocket", forHTTPHeaderField: "Upgrade")
+        request.timeoutInterval = config.connectionTimeout
 
-        webSocketTask = urlSession.webSocketTask(with: request)
-        webSocketTask?.resume()
+        let task = urlSession.webSocketTask(with: request)
+        webSocketTask = task
+        task.resume()
 
-        state = .connected
-        startReceiving()
+        let timeout = config.connectionTimeout
+
+        // Verify connection with ping before marking as connected (with timeout)
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        task.sendPing { error in
+                            if let error = error {
+                                continuation.resume(throwing: error)
+                            } else {
+                                continuation.resume()
+                            }
+                        }
+                    }
+                }
+
+                group.addTask {
+                    try await Task.sleep(for: .seconds(timeout))
+                    throw NostrError.timeout
+                }
+
+                // Wait for either ping to succeed or timeout
+                try await group.next()
+                group.cancelAll()
+            }
+            updateState(.connected)
+            resetReconnectState()
+            startReceiving()
+        } catch {
+            updateState(.failed(error.localizedDescription))
+            webSocketTask?.cancel(with: .abnormalClosure, reason: nil)
+            webSocketTask = nil
+            throw NostrError.connectionFailed(error.localizedDescription)
+        }
     }
 
     /// Disconnects from the relay
     public func disconnect() {
-        guard state == .connected else { return }
+        // Cancel any pending reconnection
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        isReconnecting = false
 
-        state = .disconnecting
+        guard state == .connected || state == .connecting else {
+            updateState(.disconnected)
+            return
+        }
+
+        updateState(.disconnecting)
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         subscriptions.removeAll()
-        state = .disconnected
+        for (_, waiter) in pendingPublishWaiters {
+            waiter.resume(throwing: NostrError.notConnected)
+        }
+        pendingPublishWaiters.removeAll()
+        updateState(.disconnected)
     }
 
     /// Sends a client message to the relay
     public func send(_ message: ClientMessage) async throws {
-        guard state == .connected, let task = webSocketTask else {
+        // Reconnect if not connected
+        if state != .connected {
+            try await connect()
+        }
+
+        guard let task = webSocketTask else {
             throw NostrError.notConnected
         }
 
         let text = try message.serialize()
-        try await task.send(.string(text))
+        do {
+            // Send with timeout
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    try await task.send(.string(text))
+                }
+
+                group.addTask {
+                    try await Task.sleep(for: .seconds(self.config.operationTimeout))
+                    throw NostrError.timeout
+                }
+
+                try await group.next()
+                group.cancelAll()
+            }
+        } catch {
+            // Update state on send failure
+            updateState(.failed(error.localizedDescription))
+            scheduleReconnectIfNeeded()
+            if let nostrError = error as? NostrError {
+                throw nostrError
+            } else {
+                throw NostrError.notConnected
+            }
+        }
 
         // Track subscription state
         switch message {
@@ -92,9 +187,41 @@ public actor RelayConnection {
         }
     }
 
-    /// Publishes an event to the relay
+    /// Publishes an event to the relay and waits for OK from the relay.
+    /// Throws if the relay responds with accepted: false or if no OK is received within the operation timeout.
     public func publish(_ event: Event) async throws {
-        try await send(.event(event))
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            pendingPublishWaiters[event.id] = cont
+
+            Task {
+                do {
+                    try await self.send(.event(event))
+                } catch {
+                    if let waiter = await self.removePublishWaiter(eventId: event.id) {
+                        waiter.resume(throwing: error)
+                    }
+                }
+            }
+
+            Task {
+                try? await Task.sleep(for: .seconds(self.config.operationTimeout))
+                if let waiter = await self.removePublishWaiter(eventId: event.id) {
+                    waiter.resume(throwing: NostrError.timeout)
+                }
+            }
+        }
+    }
+
+    /// Removes and returns the publish waiter for the given event id (called from within the actor).
+    private func removePublishWaiter(eventId: String) -> CheckedContinuation<Void, Error>? {
+        pendingPublishWaiters.removeValue(forKey: eventId)
+    }
+
+    /// Yields the relay message to all active message continuations (actor-isolated).
+    private func yieldToMessageContinuations(_ message: RelayMessage) {
+        for continuation in messageContinuations.values {
+            continuation.yield(message)
+        }
     }
 
     /// Subscribes to events matching the given filters
@@ -108,9 +235,49 @@ public actor RelayConnection {
     }
 
     /// Returns an async stream of messages from this relay
+    /// Each call creates a new stream that receives all future messages
     public func messages() -> AsyncStream<RelayMessage> {
-        AsyncStream { continuation in
-            self.messageContinuation = continuation
+        let id = UUID()
+        return AsyncStream { continuation in
+            self.messageContinuations[id] = continuation
+            continuation.onTermination = { @Sendable [weak self] _ in
+                Task { [weak self] in
+                    await self?.removeMessageContinuation(id: id)
+                }
+            }
+        }
+    }
+
+    /// Returns an async stream of connection state changes
+    public func stateChanges() -> AsyncStream<RelayConnectionState> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            self.stateChangeContinuations[id] = continuation
+            // Emit current state immediately
+            continuation.yield(self.state)
+            continuation.onTermination = { @Sendable [weak self] _ in
+                Task { [weak self] in
+                    await self?.removeStateContinuation(id: id)
+                }
+            }
+        }
+    }
+
+    /// Removes a message continuation by ID
+    private func removeMessageContinuation(id: UUID) {
+        messageContinuations.removeValue(forKey: id)
+    }
+
+    /// Removes a state continuation by ID
+    private func removeStateContinuation(id: UUID) {
+        stateChangeContinuations.removeValue(forKey: id)
+    }
+
+    /// Updates state and notifies listeners
+    private func updateState(_ newState: RelayConnectionState) {
+        state = newState
+        for continuation in stateChangeContinuations.values {
+            continuation.yield(newState)
         }
     }
 
@@ -131,12 +298,39 @@ public actor RelayConnection {
             while state == .connected {
                 do {
                     guard let task = webSocketTask else { break }
-                    let message = try await task.receive()
+
+                    // Receive with timeout
+                    let message = try await withThrowingTaskGroup(of: URLSessionWebSocketTask.Message.self) { group in
+                        group.addTask {
+                            try await task.receive()
+                        }
+
+                        group.addTask {
+                            try await Task.sleep(for: .seconds(self.config.operationTimeout))
+                            throw NostrError.timeout
+                        }
+
+                        guard let result = try await group.next() else {
+                            group.cancelAll()
+                            throw NostrError.timeout
+                        }
+                        group.cancelAll()
+                        return result
+                    }
 
                     switch message {
                     case .string(let text):
                         if let relayMessage = try? RelayMessage.parse(text) {
-                            messageContinuation?.yield(relayMessage)
+                            if case .ok(let eventId, let accepted, let message) = relayMessage {
+                                if let waiter = await self.removePublishWaiter(eventId: eventId) {
+                                    if accepted {
+                                        waiter.resume(returning: ())
+                                    } else {
+                                        waiter.resume(throwing: NostrError.relayError("Relay rejected event \(eventId): \(message)"))
+                                    }
+                                }
+                            }
+                            await self.yieldToMessageContinuations(relayMessage)
                         }
 
                     case .data:
@@ -148,14 +342,82 @@ public actor RelayConnection {
                     }
                 } catch {
                     if state == .connected {
-                        state = .failed(error.localizedDescription)
+                        updateState(.failed(error.localizedDescription))
+                        scheduleReconnectIfNeeded()
                     }
                     break
                 }
             }
 
-            messageContinuation?.finish()
+            // Don't finish continuations if we're reconnecting
+            if !isReconnecting {
+                for continuation in messageContinuations.values {
+                    continuation.finish()
+                }
+                messageContinuations.removeAll()
+            }
         }
+    }
+
+    // MARK: - Reconnection Logic
+
+    /// Resets reconnect state after successful connection
+    private func resetReconnectState() {
+        reconnectAttempts = 0
+        currentReconnectDelay = config.initialReconnectDelay
+        isReconnecting = false
+    }
+
+    /// Schedules a reconnection attempt if auto-reconnect is enabled
+    private func scheduleReconnectIfNeeded() {
+        guard config.autoReconnect else { return }
+        guard !isReconnecting else { return }
+
+        // Check if we've exceeded max attempts
+        if config.maxReconnectAttempts > 0 && reconnectAttempts >= config.maxReconnectAttempts {
+            return
+        }
+
+        isReconnecting = true
+
+        reconnectTask = Task {
+            // Wait with exponential backoff
+            let delay = currentReconnectDelay
+            try? await Task.sleep(for: .seconds(delay))
+
+            guard !Task.isCancelled else { return }
+
+            // Calculate next delay with exponential backoff
+            currentReconnectDelay = min(
+                currentReconnectDelay * config.reconnectBackoffMultiplier,
+                config.maxReconnectDelay
+            )
+            reconnectAttempts += 1
+
+            do {
+                try await connect()
+                // Resubscribe to all active subscriptions after reconnection
+                await resubscribeAll()
+            } catch {
+                // Connection failed, schedule another attempt
+                isReconnecting = false
+                scheduleReconnectIfNeeded()
+            }
+        }
+    }
+
+    /// Resubscribes to all active subscriptions after reconnection
+    private func resubscribeAll() async {
+        // Note: The subscriptions set contains all subscription IDs
+        // RelayPool will handle resubscribing with the original filters
+        // This is just a notification that reconnection happened
+    }
+
+    /// Manually trigger a reconnection attempt
+    public func reconnect() async throws {
+        disconnect()
+        resetReconnectState()
+        try await connect()
     }
 }
 

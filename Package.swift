@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "NostrClient",
+    name: "swift-nostr-client",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
