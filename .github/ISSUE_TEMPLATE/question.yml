@@ -1,0 +1,11 @@
+name: Question / Other
+description: Ask a question or other inquiries
+labels: ["question"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What would you like to know?
+    validations:
+      required: true
