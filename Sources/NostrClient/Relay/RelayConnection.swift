@@ -11,8 +11,8 @@ public actor RelayConnection {
     /// Current connection state
     public private(set) var state: RelayConnectionState = .disconnected
 
-    /// Active subscriptions
-    private var subscriptions: Set<String> = []
+    /// Active subscriptions (subscription ID -> filters) for resubscription after reconnect
+    private var subscriptions: [String: [Filter]] = [:]
 
     /// The WebSocket task
     private var webSocketTask: URLSessionWebSocketTask?
@@ -178,10 +178,10 @@ public actor RelayConnection {
 
         // Track subscription state
         switch message {
-        case .request(let subscriptionId, _):
-            subscriptions.insert(subscriptionId)
+        case .request(let subscriptionId, let filters):
+            subscriptions[subscriptionId] = filters
         case .close(let subscriptionId):
-            subscriptions.remove(subscriptionId)
+            subscriptions.removeValue(forKey: subscriptionId)
         default:
             break
         }
@@ -283,12 +283,12 @@ public actor RelayConnection {
 
     /// Checks if a subscription is active
     public func hasSubscription(_ subscriptionId: String) -> Bool {
-        subscriptions.contains(subscriptionId)
+        subscriptions[subscriptionId] != nil
     }
 
     /// Returns all active subscription IDs
     public func activeSubscriptions() -> Set<String> {
-        subscriptions
+        Set(subscriptions.keys)
     }
 
     // MARK: - Private Methods
@@ -408,9 +408,13 @@ public actor RelayConnection {
 
     /// Resubscribes to all active subscriptions after reconnection
     private func resubscribeAll() async {
-        // Note: The subscriptions set contains all subscription IDs
-        // RelayPool will handle resubscribing with the original filters
-        // This is just a notification that reconnection happened
+        for (subscriptionId, filters) in subscriptions {
+            do {
+                try await subscribe(subscriptionId: subscriptionId, filters: filters)
+            } catch {
+                // Continue with other subscriptions even if one fails
+            }
+        }
     }
 
     /// Manually trigger a reconnection attempt

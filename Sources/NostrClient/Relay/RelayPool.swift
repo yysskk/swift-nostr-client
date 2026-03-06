@@ -20,9 +20,6 @@ public actor RelayPool {
     /// Last cache cleanup time
     private var lastCacheCleanup: Date = Date()
 
-    /// Monitoring tasks for relay reconnection (keyed by relay URL)
-    private var monitoringTasks: [URL: Task<Void, Never>] = [:]
-
     /// Message listener tasks for subscriptions (keyed by subscription ID)
     private var subscriptionTasks: [String: [Task<Void, Never>]] = [:]
 
@@ -38,7 +35,6 @@ public actor RelayPool {
         }
         let connection = RelayConnection(url: url, config: config ?? self.config.defaultRelayConfig)
         relays[url] = connection
-        setupReconnectionMonitoring(for: connection)
         return connection
     }
 
@@ -51,47 +47,8 @@ public actor RelayPool {
         return addRelay(url: url, config: config)
     }
 
-    /// Sets up monitoring for relay reconnection to resubscribe
-    private func setupReconnectionMonitoring(for connection: RelayConnection) {
-        let url = connection.url
-        let task = Task {
-            var wasConnected = false
-            for await state in await connection.stateChanges() {
-                guard !Task.isCancelled else { break }
-                switch state {
-                case .connected:
-                    if wasConnected {
-                        // This is a reconnection, resubscribe to all active subscriptions
-                        await resubscribeOnReconnect(connection: connection)
-                    }
-                    wasConnected = true
-                case .disconnected, .failed:
-                    wasConnected = false
-                default:
-                    break
-                }
-            }
-        }
-        monitoringTasks[url] = task
-    }
-
-    /// Resubscribes to all active subscriptions on a reconnected relay
-    private func resubscribeOnReconnect(connection: RelayConnection) async {
-        for (subscriptionId, filters) in subscriptionFilters {
-            do {
-                try await connection.subscribe(subscriptionId: subscriptionId, filters: filters)
-            } catch {
-                // Log error but continue with other subscriptions
-            }
-        }
-    }
-
     /// Removes a relay from the pool
     public func removeRelay(url: URL) async {
-        // Cancel monitoring task first
-        monitoringTasks[url]?.cancel()
-        monitoringTasks.removeValue(forKey: url)
-
         if let connection = relays[url] {
             await connection.disconnect()
             relays.removeValue(forKey: url)
@@ -134,12 +91,6 @@ public actor RelayPool {
 
     /// Disconnects from all relays in the pool
     public func disconnectAll() async {
-        // Cancel all monitoring tasks
-        for task in monitoringTasks.values {
-            task.cancel()
-        }
-        monitoringTasks.removeAll()
-
         // Cancel all subscription listener tasks
         for tasks in subscriptionTasks.values {
             for task in tasks {
