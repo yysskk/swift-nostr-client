@@ -408,7 +408,8 @@ public actor RelayConnection {
 
     /// Resubscribes to all active subscriptions after reconnection
     private func resubscribeAll() async {
-        for (subscriptionId, filters) in subscriptions {
+        let currentSubscriptions = subscriptions
+        for (subscriptionId, filters) in currentSubscriptions {
             do {
                 try await subscribe(subscriptionId: subscriptionId, filters: filters)
             } catch {

@@ -8,9 +8,6 @@ public actor RelayPool {
     /// Subscription handlers by subscription ID
     private var subscriptionHandlers: [String: @Sendable (RelayMessage) -> Void] = [:]
 
-    /// Subscription filters by subscription ID (for resubscription after reconnect)
-    private var subscriptionFilters: [String: [Filter]] = [:]
-
     /// Pool configuration
     public let config: RelayPoolConfig
 
@@ -154,7 +151,6 @@ public actor RelayPool {
         handler: @escaping @Sendable (RelayMessage) -> Void
     ) async throws -> Int {
         subscriptionHandlers[subscriptionId] = handler
-        subscriptionFilters[subscriptionId] = filters
 
         // Start listening for messages BEFORE sending subscription request
         // This ensures we don't miss any events that arrive immediately after subscribing
@@ -222,7 +218,6 @@ public actor RelayPool {
     /// Tolerates partial failures - best effort unsubscription.
     public func unsubscribe(subscriptionId: String) async {
         subscriptionHandlers.removeValue(forKey: subscriptionId)
-        subscriptionFilters.removeValue(forKey: subscriptionId)
 
         if let tasks = subscriptionTasks.removeValue(forKey: subscriptionId) {
             for task in tasks {
