@@ -384,7 +384,7 @@ public actor NostrClient {
             subscription.handler(event)
 
         case .endOfStoredEvents:
-            subscription.eoseReceived = true
+            subscriptions[subscriptionId]?.eoseReceived = true
 
         default:
             break
@@ -398,7 +398,7 @@ public actor NostrClient {
 }
 
 // MARK: - Subscription
-private final class Subscription: @unchecked Sendable {
+private struct Subscription: Sendable {
     let id: String
     let filters: [Filter]
     let handler: @Sendable (Event) -> Void
