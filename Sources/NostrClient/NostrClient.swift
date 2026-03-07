@@ -279,6 +279,7 @@ public actor NostrClient {
 
     /// Unsubscribes from a subscription
     public func unsubscribe(subscriptionId: String) async {
+        subscriptions[subscriptionId]?.eoseSignal?.finish()
         subscriptions.removeValue(forKey: subscriptionId)
         await relayPool.unsubscribe(subscriptionId: subscriptionId)
     }
@@ -338,6 +339,7 @@ public actor NostrClient {
     // MARK: - One-time Fetches
 
     /// Fetches events matching the given filters (one-time)
+    /// Returns early when EOSE is received, or after timeout (whichever comes first)
     public func fetch(filters: [Filter], timeout: TimeInterval = 10) async throws -> [Event] {
         let collectedEvents = EventCollector()
 
@@ -347,10 +349,31 @@ public actor NostrClient {
             }
         }
 
-        // Wait for EOSE or timeout
-        try await Task.sleep(for: .seconds(timeout))
-        await unsubscribe(subscriptionId: subscriptionId)
+        // Create EOSE signal stream
+        let (eoseStream, eoseContinuation) = AsyncStream.makeStream(of: Void.self)
 
+        // Install signal on subscription (actor-isolated, so safe)
+        if subscriptions[subscriptionId]?.eoseReceived == true {
+            eoseContinuation.finish()
+        } else {
+            subscriptions[subscriptionId]?.eoseSignal = eoseContinuation
+        }
+
+        // Race EOSE vs timeout
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await _ in eoseStream { break }
+            }
+
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeout))
+            }
+
+            await group.next()
+            group.cancelAll()
+        }
+
+        await unsubscribe(subscriptionId: subscriptionId)
         return await collectedEvents.events
     }
 
@@ -385,6 +408,8 @@ public actor NostrClient {
 
         case .endOfStoredEvents:
             subscriptions[subscriptionId]?.eoseReceived = true
+            subscriptions[subscriptionId]?.eoseSignal?.finish()
+            subscriptions[subscriptionId]?.eoseSignal = nil
 
         default:
             break
@@ -403,6 +428,7 @@ private struct Subscription: Sendable {
     let filters: [Filter]
     let handler: @Sendable (Event) -> Void
     var eoseReceived: Bool = false
+    var eoseSignal: AsyncStream<Void>.Continuation?
 
     init(id: String, filters: [Filter], handler: @escaping @Sendable (Event) -> Void) {
         self.id = id
