@@ -267,11 +267,25 @@ public actor NostrClient {
         subscriptions[subscriptionId] = subscription
 
         let capturedSubscriptionId = subscriptionId
-        try await relayPool.subscribe(subscriptionId: subscriptionId, filters: filters) { [weak self] message in
-            guard let self else { return }
-            Task {
-                await self.handleMessage(message, subscriptionId: capturedSubscriptionId)
+        do {
+            let expectedEOSECount = try await relayPool.subscribe(
+                subscriptionId: subscriptionId,
+                filters: filters
+            ) { [weak self] message in
+                guard let self else { return }
+                Task {
+                    await self.handleMessage(message, subscriptionId: capturedSubscriptionId)
+                }
             }
+
+            if var subscription = subscriptions[subscriptionId] {
+                subscription.eoseTracker.setExpectedCount(expectedEOSECount)
+                subscriptions[subscriptionId] = subscription
+            }
+        } catch {
+            subscriptions[subscriptionId]?.eoseSignal?.finish()
+            subscriptions.removeValue(forKey: subscriptionId)
+            throw error
         }
 
         return subscriptionId
@@ -279,12 +293,16 @@ public actor NostrClient {
 
     /// Unsubscribes from a subscription
     public func unsubscribe(subscriptionId: String) async {
+        subscriptions[subscriptionId]?.eoseSignal?.finish()
         subscriptions.removeValue(forKey: subscriptionId)
         await relayPool.unsubscribe(subscriptionId: subscriptionId)
     }
 
     /// Unsubscribes from all subscriptions
     public func unsubscribeAll() async {
+        for (_, subscription) in subscriptions {
+            subscription.eoseSignal?.finish()
+        }
         for subscriptionId in subscriptions.keys {
             await relayPool.unsubscribe(subscriptionId: subscriptionId)
         }
@@ -338,6 +356,7 @@ public actor NostrClient {
     // MARK: - One-time Fetches
 
     /// Fetches events matching the given filters (one-time)
+    /// Returns early when EOSE is received, or after timeout (whichever comes first)
     public func fetch(filters: [Filter], timeout: TimeInterval = 10) async throws -> [Event] {
         let collectedEvents = EventCollector()
 
@@ -347,10 +366,37 @@ public actor NostrClient {
             }
         }
 
-        // Wait for EOSE or timeout
-        try await Task.sleep(for: .seconds(timeout))
-        await unsubscribe(subscriptionId: subscriptionId)
+        // Create EOSE signal stream
+        let (eoseStream, eoseContinuation) = AsyncStream.makeStream(of: Void.self)
 
+        // Install signal on subscription (actor-isolated, so safe)
+        if subscriptions[subscriptionId]?.eoseTracker.isComplete == true {
+            eoseContinuation.finish()
+        } else {
+            subscriptions[subscriptionId]?.eoseSignal = eoseContinuation
+        }
+
+        // Race EOSE vs timeout
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await _ in eoseStream { break }
+            }
+
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeout))
+            }
+
+            await group.next()
+            group.cancelAll()
+        }
+
+        // Propagate cancellation if caller cancelled the task
+        if Task.isCancelled {
+            await unsubscribe(subscriptionId: subscriptionId)
+            throw CancellationError()
+        }
+
+        await unsubscribe(subscriptionId: subscriptionId)
         return await collectedEvents.events
     }
 
@@ -376,7 +422,7 @@ public actor NostrClient {
     // MARK: - Private Methods
 
     private func handleMessage(_ message: RelayMessage, subscriptionId: String) {
-        guard let subscription = subscriptions[subscriptionId] else { return }
+        guard var subscription = subscriptions[subscriptionId] else { return }
 
         switch message {
         case .event(_, let event):
@@ -384,7 +430,11 @@ public actor NostrClient {
             subscription.handler(event)
 
         case .endOfStoredEvents:
-            subscriptions[subscriptionId]?.eoseReceived = true
+            if subscription.eoseTracker.recordEOSE() {
+                subscription.eoseSignal?.finish()
+                subscription.eoseSignal = nil
+            }
+            subscriptions[subscriptionId] = subscription
 
         default:
             break
@@ -402,7 +452,8 @@ private struct Subscription: Sendable {
     let id: String
     let filters: [Filter]
     let handler: @Sendable (Event) -> Void
-    var eoseReceived: Bool = false
+    var eoseTracker = EOSETracker()
+    var eoseSignal: AsyncStream<Void>.Continuation?
 
     init(id: String, filters: [Filter], handler: @escaping @Sendable (Event) -> Void) {
         self.id = id
