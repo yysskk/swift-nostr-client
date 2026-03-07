@@ -6,7 +6,7 @@ public actor RelayPool {
     private var relays: [URL: RelayConnection] = [:]
 
     /// Subscription handlers by subscription ID
-    private var subscriptionHandlers: [String: @Sendable (RelayMessage) -> Void] = [:]
+    private var subscriptionHandlers: [String: @Sendable (RelaySubscriptionMessage) -> Void] = [:]
 
     /// Pool configuration
     public let config: RelayPoolConfig
@@ -150,6 +150,22 @@ public actor RelayPool {
         filters: [Filter],
         handler: @escaping @Sendable (RelayMessage) -> Void
     ) async throws -> Int {
+        let successfulRelayURLs = try await subscribeWithRelayContext(
+            subscriptionId: subscriptionId,
+            filters: filters
+        ) { relayMessage in
+            handler(relayMessage.message)
+        }
+
+        return successfulRelayURLs.count
+    }
+
+    @discardableResult
+    func subscribeWithRelayContext(
+        subscriptionId: String,
+        filters: [Filter],
+        handler: @escaping @Sendable (RelaySubscriptionMessage) -> Void
+    ) async throws -> Set<URL> {
         subscriptionHandlers[subscriptionId] = handler
 
         // Start listening for messages BEFORE sending subscription request
@@ -159,19 +175,48 @@ public actor RelayPool {
             let task = Task {
                 for await message in await connection.messages() {
                     guard !Task.isCancelled else { break }
+                    let relayURL = connection.url
                     switch message {
                     case .event(let subId, let event) where subId == subscriptionId:
                         // Deduplicate events across relays
-                        let isDuplicate = await self.isDuplicateEvent(eventId: event.id)
+                        let isDuplicate = self.isDuplicateEvent(eventId: event.id)
                         if !isDuplicate {
-                            await self.markEventAsSeen(eventId: event.id)
-                            if let currentHandler = await self.subscriptionHandlers[subscriptionId] {
-                                currentHandler(message)
+                            self.markEventAsSeen(eventId: event.id)
+                            if let currentHandler = self.subscriptionHandlers[subscriptionId] {
+                                currentHandler(
+                                    RelaySubscriptionMessage(
+                                        relayURL: relayURL,
+                                        message: message
+                                    )
+                                )
                             }
                         }
                     case .endOfStoredEvents(let subId) where subId == subscriptionId:
-                        if let currentHandler = await self.subscriptionHandlers[subscriptionId] {
-                            currentHandler(message)
+                        if let currentHandler = self.subscriptionHandlers[subscriptionId] {
+                            currentHandler(
+                                RelaySubscriptionMessage(
+                                    relayURL: relayURL,
+                                    message: message
+                                )
+                            )
+                        }
+                    case .closed(let subId, _) where subId == subscriptionId:
+                        if let currentHandler = self.subscriptionHandlers[subscriptionId] {
+                            currentHandler(
+                                RelaySubscriptionMessage(
+                                    relayURL: relayURL,
+                                    message: message
+                                )
+                            )
+                        }
+                    case .notice, .auth:
+                        if let currentHandler = self.subscriptionHandlers[subscriptionId] {
+                            currentHandler(
+                                RelaySubscriptionMessage(
+                                    relayURL: relayURL,
+                                    message: message
+                                )
+                            )
                         }
                     default:
                         break
@@ -186,32 +231,32 @@ public actor RelayPool {
         await Task.yield()
 
         // Now send subscription requests to all relays, tolerating failures
-        var successCount = 0
+        var successfulRelayURLs: Set<URL> = []
 
-        await withTaskGroup(of: Bool.self) { group in
+        await withTaskGroup(of: URL?.self) { group in
             for connection in relays.values {
                 group.addTask {
                     do {
                         try await connection.subscribe(subscriptionId: subscriptionId, filters: filters)
-                        return true
+                        return connection.url
                     } catch {
-                        return false
+                        return nil
                     }
                 }
             }
 
-            for await success in group {
-                if success {
-                    successCount += 1
+            for await relayURL in group {
+                if let relayURL {
+                    successfulRelayURLs.insert(relayURL)
                 }
             }
         }
 
-        if successCount == 0 && !relays.isEmpty {
+        if successfulRelayURLs.isEmpty && !relays.isEmpty {
             throw NostrError.relayError("Failed to subscribe on any relay")
         }
 
-        return successCount
+        return successfulRelayURLs
     }
 
     /// Unsubscribes from a subscription on all relays.
