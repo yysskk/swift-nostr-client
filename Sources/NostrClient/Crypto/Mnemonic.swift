@@ -59,13 +59,9 @@ public struct Mnemonic: Sendable {
         // 24 words = 256 bits = 32 bytes
         let entropyBytes = wordCount * 4 / 3
 
-        var entropy = [UInt8](repeating: 0, count: entropyBytes)
-        var rng = SystemRandomNumberGenerator()
-        for i in 0..<entropyBytes {
-            entropy[i] = UInt8.random(in: 0...255, using: &rng)
-        }
+        let entropy = try SecureRandom.generateBytes(count: entropyBytes)
 
-        return try fromEntropy(Data(entropy))
+        return try fromEntropy(entropy)
     }
 
     /// Creates a mnemonic from entropy data

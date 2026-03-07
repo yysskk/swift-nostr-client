@@ -28,6 +28,7 @@ public enum NostrError: Error, LocalizedError, Sendable, Equatable {
     case invalidMnemonic
     case invalidMnemonicWord(String)
     case invalidMnemonicChecksum
+    case randomGenerationFailed
 
     public var errorDescription: String? {
         switch self {
@@ -83,6 +84,8 @@ public enum NostrError: Error, LocalizedError, Sendable, Equatable {
             return "Invalid mnemonic word: \(word)"
         case .invalidMnemonicChecksum:
             return "Invalid mnemonic checksum"
+        case .randomGenerationFailed:
+            return "Failed to generate secure random bytes"
         }
     }
 }
