@@ -308,11 +308,6 @@ public struct SealedMessage: Sendable {
     /// - Parameter count: The number of random bytes to generate
     /// - Returns: Data containing the random bytes
     private static func generateSecureRandomBytes(count: Int) throws -> Data {
-        var bytes = [UInt8](repeating: 0, count: count)
-        var generator = SystemRandomNumberGenerator()
-        for i in 0..<count {
-            bytes[i] = UInt8.random(in: 0...255, using: &generator)
-        }
-        return Data(bytes)
+        try SecureRandom.generateBytes(count: count)
     }
 }
