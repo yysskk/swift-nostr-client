@@ -437,7 +437,7 @@ public actor NostrClient {
     // MARK: - One-time Fetches
 
     /// Fetches events matching the given filters (one-time)
-    /// Returns early when EOSE is received, or after timeout (whichever comes first)
+    /// Waits for all subscribed relays to send EOSE, or until timeout (whichever comes first)
     public func fetch(filters: [Filter], timeout: TimeInterval = 10) async throws -> [Event] {
         let collectedEvents = EventCollector()
 
