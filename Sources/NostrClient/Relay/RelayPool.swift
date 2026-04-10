@@ -6,7 +6,7 @@ public actor RelayPool {
     private var relays: [URL: RelayConnection] = [:]
 
     /// Subscription handlers by subscription ID
-    private var subscriptionHandlers: [String: @Sendable (RelaySubscriptionMessage) -> Void] = [:]
+    private var subscriptionHandlers: [String: @Sendable (RelaySubscriptionMessage) async -> Void] = [:]
 
     /// Pool configuration
     public let config: RelayPoolConfig
@@ -164,7 +164,7 @@ public actor RelayPool {
     func subscribeWithRelayContext(
         subscriptionId: String,
         filters: [Filter],
-        handler: @escaping @Sendable (RelaySubscriptionMessage) -> Void
+        handler: @escaping @Sendable (RelaySubscriptionMessage) async -> Void
     ) async throws -> Set<URL> {
         subscriptionHandlers[subscriptionId] = handler
 
@@ -183,7 +183,7 @@ public actor RelayPool {
                         if !isDuplicate {
                             self.markEventAsSeen(eventId: event.id)
                             if let currentHandler = self.subscriptionHandlers[subscriptionId] {
-                                currentHandler(
+                                await currentHandler(
                                     RelaySubscriptionMessage(
                                         relayURL: relayURL,
                                         message: message
@@ -193,7 +193,7 @@ public actor RelayPool {
                         }
                     case .endOfStoredEvents(let subId) where subId == subscriptionId:
                         if let currentHandler = self.subscriptionHandlers[subscriptionId] {
-                            currentHandler(
+                            await currentHandler(
                                 RelaySubscriptionMessage(
                                     relayURL: relayURL,
                                     message: message
@@ -202,7 +202,7 @@ public actor RelayPool {
                         }
                     case .closed(let subId, _) where subId == subscriptionId:
                         if let currentHandler = self.subscriptionHandlers[subscriptionId] {
-                            currentHandler(
+                            await currentHandler(
                                 RelaySubscriptionMessage(
                                     relayURL: relayURL,
                                     message: message
@@ -211,7 +211,7 @@ public actor RelayPool {
                         }
                     case .notice, .auth:
                         if let currentHandler = self.subscriptionHandlers[subscriptionId] {
-                            currentHandler(
+                            await currentHandler(
                                 RelaySubscriptionMessage(
                                     relayURL: relayURL,
                                     message: message
