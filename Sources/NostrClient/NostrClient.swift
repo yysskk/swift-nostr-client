@@ -301,13 +301,11 @@ public actor NostrClient {
                 filters: filters
             ) { [weak self] relayMessage in
                 guard let self else { return }
-                Task {
-                    await self.handleMessage(
-                        relayMessage.message,
-                        from: relayMessage.relayURL,
-                        subscriptionId: capturedSubscriptionId
-                    )
-                }
+                await self.handleMessage(
+                    relayMessage.message,
+                    from: relayMessage.relayURL,
+                    subscriptionId: capturedSubscriptionId
+                )
             }
 
             if var subscription = subscriptions[subscriptionId] {
@@ -513,7 +511,6 @@ public actor NostrClient {
                 subscription.eoseSignal?.finish()
                 subscription.eoseSignal = nil
             }
-            subscriptions[subscriptionId] = subscription
 
         case .closed(_, let message):
             subscription.handler(.closed(relayURL: relayURL, message: message))
@@ -527,6 +524,8 @@ public actor NostrClient {
         default:
             break
         }
+
+        subscriptions[subscriptionId] = subscription
     }
 
     private func installEOSESignal(
