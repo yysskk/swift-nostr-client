@@ -1,0 +1,658 @@
+# swift-nostr-client: Complete Documentation
+
+> swift-nostr-client is a modern Swift library for the Nostr protocol. It provides an actor-based, type-safe API for relay connections, event signing, subscriptions, encrypted direct messages, and BIP-39 key derivation. All types are Sendable for Swift concurrency. MIT licensed.
+
+## Installation
+
+Add the package dependency in `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/yysskk/swift-nostr-client", from: "1.0.0")
+]
+```
+
+Add `NostrClient` to your target:
+
+```swift
+.target(
+    name: "YourTarget",
+    dependencies: ["NostrClient"]
+)
+```
+
+Or add via Xcode: File > Add Package Dependencies > Enter the repository URL.
+
+## Requirements
+
+- Swift 6.2+
+- iOS 17.0+ / macOS 14.0+ / tvOS 17.0+ / watchOS 10.0+ / visionOS 1.0+
+
+## Quick Start
+
+```swift
+import NostrClient
+
+let client = NostrClient()
+
+// Set signer
+try await client.setNsec("nsec1...")
+
+// Add relays and connect
+try await client.addRelays(["wss://relay.damus.io", "wss://nos.lol"])
+try await client.connect()
+
+// Publish a text note
+let event = try await client.publishTextNote(content: "Hello, Nostr!")
+
+// Subscribe to events
+try await client.subscribeToGlobalFeed(limit: 50, eventHandler: { subscriptionEvent in
+    switch subscriptionEvent {
+    case .event(let relayURL, let event):
+        print("[\(relayURL)] \(event.content)")
+    case .eose(let relayURL):
+        print("[\(relayURL)] End of stored events")
+    case .closed(let relayURL, let message):
+        print("[\(relayURL)] Closed: \(message)")
+    case .notice(let relayURL, let message):
+        print("[\(relayURL)] Notice: \(message)")
+    case .auth(let relayURL, let challenge):
+        print("[\(relayURL)] Auth challenge: \(challenge)")
+    }
+})
+```
+
+## NostrClient Actor
+
+The main entry point for the library. Manages relays, publishing, and subscriptions.
+
+### Properties
+
+- `relayPool: RelayPool` -- the underlying relay pool
+- `publicKey: String?` -- hex public key if signer is set
+- `npub: String?` -- npub if signer is set
+
+### Signer Setup
+
+```swift
+try await client.setSigner(signer)         // EventSigner
+try await client.setPrivateKey("hex...")    // hex private key
+try await client.setNsec("nsec1...")        // bech32 nsec
+```
+
+### Relay Management
+
+```swift
+try await client.addRelay("wss://relay.damus.io")
+try await client.addRelay("wss://relay.damus.io", config: customConfig)
+try await client.addRelays(["wss://relay1.example.com", "wss://relay2.example.com"])
+try await client.connect()
+await client.disconnect()
+```
+
+### Publishing
+
+```swift
+let event = try await client.publishTextNote(content: "Hello!", tags: [["t", "nostr"]])
+try await client.publishReply(to: parentEvent, content: "Nice post!")
+try await client.publishMetadata(UserMetadata(name: "Alice", about: "Nostr user"))
+try await client.publishReaction(to: event, content: "🤙")
+try await client.publishRepost(of: event, relayUrl: "wss://relay.damus.io")
+try await client.publishDeletion(eventIds: ["eventId1"], reason: "posted by mistake")
+try await client.publishContactList([Contact(pubkey: "...", relayUrl: "wss://...")])
+try await client.publish(signedEvent)  // publish any pre-signed event
+```
+
+### Subscriptions
+
+All subscription handlers receive `SubscriptionEvent` which includes relay context:
+
+```swift
+// Convenience subscriptions
+let subId = try await client.subscribeToUserTimeline(pubkey: "...") { event in }
+try await client.subscribeToGlobalFeed(limit: 50) { event in }
+try await client.subscribeToMentions(pubkey: "...") { event in }
+try await client.subscribeToMetadata(pubkeys: ["..."]) { event in }
+
+// Custom filter subscription
+let filter = Filter(kinds: [1], authors: ["pubkey1", "pubkey2"], limit: 100)
+let subId = try await client.subscribe(filters: [filter]) { event in }
+
+// Unsubscribe
+await client.unsubscribe(subscriptionId: subId)
+await client.unsubscribeAll()
+```
+
+### One-Shot Fetches
+
+Fetch methods open a temporary subscription, wait for all relays to signal EOSE, then return results:
+
+```swift
+let events = try await client.fetch(filters: [filter])
+let event = try await client.fetchEvent(id: "eventId...")
+let metadata = try await client.fetchMetadata(pubkey: "...")
+```
+
+### Direct Messages (NIP-17)
+
+```swift
+// Send
+try await client.sendDirectMessage("Hello!", to: "recipientPubkey")
+
+// Subscribe to incoming DMs
+try await client.subscribeToDirectMessages { event in
+    let dm = try await client.parseDirectMessage(event)
+    print("From: \(dm.senderPubkey), Content: \(dm.content)")
+}
+
+// Parse a received gift wrap event
+let dm = try await client.parseDirectMessage(giftWrapEvent)
+```
+
+## Event
+
+NIP-01 Nostr Event (struct: Codable, Identifiable, Hashable, Sendable).
+
+### Properties
+
+- `id: String` -- 32-byte lowercase hex sha256
+- `pubkey: String` -- 32-byte hex public key
+- `createdAt: Int64` -- unix timestamp in seconds
+- `kind: Int` -- event kind integer
+- `tags: [[String]]` -- array of tag arrays
+- `content: String` -- arbitrary string content
+- `sig: String` -- 64-byte hex Schnorr signature
+
+### Event.Kind Constants
+
+```swift
+Event.Kind.setMetadata           // 0
+Event.Kind.textNote              // 1
+Event.Kind.recommendRelay        // 2
+Event.Kind.contacts              // 3
+Event.Kind.encryptedDirectMessage // 4
+Event.Kind.eventDeletion         // 5
+Event.Kind.repost                // 6
+Event.Kind.reaction              // 7
+Event.Kind.seal                  // 13  (NIP-59)
+Event.Kind.privateDirectMessage  // 14  (NIP-17)
+Event.Kind.giftWrap              // 1059 (NIP-59)
+Event.Kind.zapRequest            // 9734
+Event.Kind.zap                   // 9735
+```
+
+### Verification
+
+```swift
+let isValid = try event.verify()  // verifies Schnorr signature
+```
+
+## UnsignedEvent
+
+Event before signing (struct: Sendable). Same fields as Event minus `id` and `sig`.
+
+```swift
+let unsigned = UnsignedEvent(
+    pubkey: keyPair.publicKeyHex,
+    kind: .textNote,
+    tags: [["t", "test"]],
+    content: "Hello"
+)
+let serialized = unsigned.serializedForHashing()  // NIP-01 serialization
+```
+
+## Filter
+
+NIP-01 Subscription Filter (struct: Codable, Sendable, Hashable).
+
+### Properties
+
+- `ids: [String]?` -- event IDs to match
+- `authors: [String]?` -- author pubkeys to match
+- `kinds: [Int]?` -- event kinds to match
+- `eventReferences: [String]?` -- #e tag references
+- `pubkeyReferences: [String]?` -- #p tag references
+- `since: Int64?` -- unix timestamp lower bound
+- `until: Int64?` -- unix timestamp upper bound
+- `limit: Int?` -- max events to return
+
+### Generic Tag Queries
+
+```swift
+var filter = Filter()
+filter.addTagQuery("t", values: ["nostr", "bitcoin"])  // #t tag
+let values = filter.getTagQuery("t")
+```
+
+### Convenience Builders
+
+```swift
+Filter.userNotes(pubkey: "...", limit: 50)
+Filter.metadata(pubkeys: ["..."])
+Filter.replies(to: "eventId", limit: 20)
+Filter.mentions(pubkey: "...")
+Filter.globalFeed(limit: 100)
+Filter.contactList(pubkey: "...")
+```
+
+## SubscriptionEvent
+
+High-level subscription events from NostrClient (enum: Sendable).
+
+### Cases
+
+- `.event(relayURL: URL, event: Event)` -- event delivered from a relay
+- `.eose(relayURL: URL)` -- end of stored events signal
+- `.closed(relayURL: URL, message: String)` -- subscription closed by relay
+- `.notice(relayURL: URL, message: String)` -- relay notice message
+- `.auth(relayURL: URL, challenge: String)` -- relay auth challenge (NIP-42)
+
+All cases expose `relayURL` property to identify the source relay.
+
+## RelayMessage
+
+Messages received from relay (NIP-01) (enum: Sendable).
+
+### Cases
+
+- `.event(subscriptionId: String, event: Event)`
+- `.endOfStoredEvents(subscriptionId: String)`
+- `.notice(message: String)`
+- `.ok(eventId: String, accepted: Bool, message: String)` -- NIP-20
+- `.auth(challenge: String)` -- NIP-42
+- `.closed(subscriptionId: String, message: String)`
+- `.unknown(type: String, rawData: String)`
+
+### Parsing
+
+```swift
+let message = try RelayMessage.parse(jsonString)
+```
+
+## ClientMessage
+
+Messages sent to relay (NIP-01) (enum: Sendable).
+
+### Cases
+
+- `.event(Event)` -- publish event
+- `.request(subscriptionId: String, filters: [Filter])` -- subscribe
+- `.close(subscriptionId: String)` -- unsubscribe
+- `.auth(Event)` -- authentication (NIP-42)
+
+```swift
+let json = clientMessage.serialize()  // JSON array string
+```
+
+## UserMetadata
+
+User profile metadata (NIP-01) (struct: Codable, Sendable).
+
+### Properties
+
+- `name: String?`
+- `about: String?`
+- `picture: String?`
+- `nip05: String?`
+- `banner: String?`
+- `displayName: String?`
+- `website: String?`
+- `lud06: String?` -- LNURL
+- `lud16: String?` -- Lightning Address
+
+## KeyPair
+
+Nostr keypair (struct: Sendable).
+
+### Properties
+
+- `privateKey: Data` -- 32-byte private key
+- `publicKey: Data` -- 32-byte x-only public key
+- `privateKeyHex: String`, `publicKeyHex: String`
+- `nsec: String`, `npub: String`
+
+### Initialization
+
+```swift
+let random = try KeyPair()                           // random keypair
+let fromHex = try KeyPair(privateKeyHex: "hex...")    // from hex
+let fromNsec = try KeyPair(nsec: "nsec1...")          // from bech32 nsec
+let fromMnemonic = try KeyPair(                       // from BIP-39 (NIP-06)
+    mnemonicPhrase: "word1 word2 ...",
+    passphrase: "",
+    account: 0
+)
+let (mnemonic, kp) = try KeyPair.generate(wordCount: 12)  // random mnemonic
+```
+
+## PublicKey
+
+Nostr public key only (struct: Sendable, Hashable).
+
+### Properties
+
+- `data: Data` -- 32-byte x-only public key
+- `hex: String`
+- `npub: String`
+
+### Initialization
+
+```swift
+let pk = try PublicKey(hex: "...")
+let pk = try PublicKey(npub: "npub1...")
+let pk = try PublicKey(data: data)
+```
+
+## EventSigner
+
+Handles signing and verification of Nostr events (struct: Sendable).
+
+### Initialization
+
+```swift
+let signer = EventSigner(keyPair: keyPair)
+let signer = try EventSigner(privateKeyHex: "hex...")
+let signer = try EventSigner(nsec: "nsec1...")
+```
+
+### Properties
+
+- `publicKey: String` -- hex public key
+- `npub: String`
+- `keyPair: KeyPair`
+
+### Signing Methods
+
+```swift
+let signed = try signer.sign(unsignedEvent)
+let note = try signer.signTextNote(content: "Hello", tags: [])
+let meta = try signer.signMetadata(UserMetadata(name: "Alice"))
+let reaction = try signer.signReaction(to: event, content: "🤙")
+let repost = try signer.signRepost(of: event, relayUrl: "wss://...")
+let deletion = try signer.signDeletion(eventIds: ["id1"], reason: "mistake")
+let contacts = try signer.signContactList([Contact(pubkey: "...")])
+```
+
+## Mnemonic
+
+BIP-39 mnemonic seed phrase for NIP-06 key derivation (struct: Sendable).
+
+### Properties
+
+- `words: [String]`
+- `phrase: String` -- space-separated
+- `wordCount: Int`
+
+### Usage
+
+```swift
+let mnemonic = try Mnemonic.generate(wordCount: 12)  // 12, 15, 18, 21, or 24
+let mnemonic = try Mnemonic(phrase: "word1 word2 ...")
+let seed = try mnemonic.toSeed(passphrase: "optional")  // 64-byte seed
+```
+
+## KeyDerivation
+
+BIP-32/BIP-39 key derivation for NIP-06 (enum).
+
+### Constants
+
+- `hardenedOffset: UInt32 = 0x80000000`
+- `bip44Purpose: UInt32 = 44`
+- `nostrCoinType: UInt32 = 1237`
+
+### Derivation
+
+```swift
+// Derives key using path m/44'/1237'/<account>'/0/0
+let privateKey = try KeyDerivation.deriveNostrKey(seed: seed, account: 0)
+```
+
+## SealedMessage
+
+NIP-44 versioned encryption v2 (struct: Sendable).
+
+Uses ECDH shared secret, HKDF key derivation, ChaCha20 encryption, HMAC-SHA256 authentication, and timing-safe comparison.
+
+```swift
+// Seal
+let sealed = try SealedMessage.seal("message", for: recipientPubkey, using: senderKeyPair)
+print(sealed.payload)  // base64-encoded
+
+// Open
+let plaintext = try sealed.open(from: senderPubkey, using: recipientKeyPair)
+```
+
+## GiftWrap
+
+NIP-59 Gift Wrap for sender anonymity (struct: Sendable).
+
+Wraps events through rumor > seal > gift wrap layers with randomized timestamps for privacy.
+
+```swift
+// Wrap
+let wrapped = try GiftWrap.wrap(
+    event: rumorEvent,
+    senderKeyPair: senderKeyPair,
+    recipientPubkey: recipientPubkey
+)
+
+// Unwrap
+let unwrapped = try GiftWrap.unwrap(
+    giftWrap: wrappedEvent,
+    recipientKeyPair: recipientKeyPair
+)
+print(unwrapped.senderPubkey)  // original sender
+print(unwrapped.event)         // original event
+```
+
+## DirectMessage
+
+NIP-17 Private Direct Message (struct: Sendable, Identifiable, Hashable).
+
+### Properties
+
+- `rumorId: String` -- message ID (also Identifiable.id)
+- `senderPubkey: String` -- sender's hex public key
+- `recipientPubkey: String` -- recipient's hex public key
+- `content: String` -- message content
+- `createdAt: Date` -- creation timestamp
+- `subject: String?` -- optional conversation subject
+- `replyTo: String?` -- optional event ID being replied to
+
+## DirectMessageBuilder
+
+Builder for NIP-17 direct message events (struct: Sendable).
+
+```swift
+let builder = DirectMessageBuilder(keyPair: keyPair)
+
+// Single recipient
+let giftWraps = try builder.createMessage(
+    content: "Hello!",
+    to: recipientPubkey,
+    subject: "Greetings",
+    replyTo: nil
+)
+
+// Group message (one gift wrap per recipient + sender copy)
+let allWraps = try builder.createGroupMessage(
+    content: "Group hello!",
+    to: [pubkey1, pubkey2]
+)
+```
+
+## DirectMessageParser
+
+Parser for received NIP-17 direct messages (struct: Sendable).
+
+```swift
+let parser = DirectMessageParser(keyPair: recipientKeyPair)
+let dm = try parser.parse(giftWrapEvent)
+print(dm.content)
+```
+
+## Contact
+
+Contact information for NIP-02 (struct: Codable, Hashable, Sendable).
+
+### Properties
+
+- `pubkey: String` -- hex public key
+- `relayUrl: String?` -- recommended relay URL
+- `petname: String?` -- local nickname
+
+### Usage
+
+```swift
+let contact = Contact(pubkey: "...", relayUrl: "wss://...", petname: "alice")
+let contact = try Contact(npub: "npub1...", relayUrl: nil, petname: nil)
+let tag = contact.toTag()           // ["p", pubkey, relayUrl, petname]
+let parsed = Contact.fromTag(tag)   // parse from tag array
+
+// Extract contacts from kind-3 event
+let contacts = event.contacts       // [Contact]?
+let isList = event.isContactList    // Bool
+```
+
+## InternetIdentifier
+
+NIP-05 DNS-based internet identifier verification (struct: Sendable).
+
+```swift
+// Verify identifier
+let result = try await InternetIdentifier.verify("alice@example.com")
+print(result.pubkey)   // hex pubkey
+print(result.relays)   // [String]
+
+// Verify against expected pubkey
+try await InternetIdentifier.verify("alice@example.com", expectedPubkey: "hex...")
+
+// Look up pubkey or relays
+let pubkey = try await InternetIdentifier.lookupPubkey("alice@example.com")
+let relays = try await InternetIdentifier.lookupRelays("alice@example.com")
+
+// String extensions
+"alice@example.com".isValidInternetIdentifier  // Bool
+try await "alice@example.com".verifyAsInternetIdentifier()
+```
+
+## OpenTimestamps
+
+OpenTimestamps attestation support for NIP-03 (struct: Sendable, Hashable).
+
+```swift
+let ots = OpenTimestamps(base64EncodedOTS: "...")
+let ots = OpenTimestamps(otsFileData: data)
+let tag = ots.toTag()               // ["ots", base64data]
+let raw = ots.rawData               // Data?
+
+// Event extensions
+let ots = event.openTimestamps      // OpenTimestamps?
+let has = event.hasOpenTimestamps   // Bool
+```
+
+## RelayPool
+
+Manages connections to multiple Nostr relays (actor).
+
+### Configuration
+
+```swift
+let config = RelayPoolConfig(
+    maxDeduplicationCacheSize: 10000,
+    deduplicationCacheTTL: 300
+)
+```
+
+### Methods
+
+```swift
+try await pool.addRelay(url: url, config: relayConfig)
+try await pool.removeRelay(url: url)
+try await pool.connectAll()      // tolerates partial failures
+await pool.disconnectAll()
+try await pool.subscribe(subscriptionId: "sub1", filters: [filter]) { message in }
+try await pool.subscribeWithRelayContext(subscriptionId: "sub1", filters: [filter]) { relayURL, message in }
+try await pool.unsubscribe(subscriptionId: "sub1")
+try await pool.publish(signedEvent)
+await pool.clearDeduplicationCache()
+```
+
+## RelayConnection
+
+Manages WebSocket connection to a single relay (actor).
+
+### Properties
+
+- `url: URL` -- relay WebSocket URL
+- `state: RelayConnectionState` -- current connection state
+- `config: RelayConnectionConfig`
+
+### Configuration
+
+```swift
+let config = RelayConnectionConfig(
+    connectionTimeout: 10,           // seconds
+    operationTimeout: 30,            // seconds
+    autoReconnect: true,
+    maxReconnectAttempts: 10,
+    initialReconnectDelay: 1,        // seconds
+    maxReconnectDelay: 60,           // seconds
+    reconnectBackoffMultiplier: 2
+)
+```
+
+### Methods
+
+```swift
+await connection.connect()
+await connection.disconnect()
+try await connection.subscribe(subscriptionId: "sub1", filters: [filter]) { message in }
+try await connection.unsubscribe(subscriptionId: "sub1")
+try await connection.publish(signedEvent)
+for await message in await connection.messages() { }  // AsyncStream<RelayMessage>
+```
+
+Features: automatic reconnection with exponential backoff, subscription resubscription on reconnect.
+
+## RelayConnectionState
+
+Connection state (enum: Sendable, Equatable).
+
+Cases: `.disconnected`, `.connecting`, `.connected`, `.disconnecting`, `.failed(String)`.
+
+## Bech32
+
+Bech32 encoding/decoding for NIP-19 (enum).
+
+```swift
+let encoded = try Bech32.encode(hrp: "npub", data: pubkeyData)
+let (hrp, data) = try Bech32.decode("npub1...")
+```
+
+## NostrError
+
+Error types (enum: Error, LocalizedError, Sendable, Equatable).
+
+Cases: `invalidPrivateKey`, `invalidPublicKey`, `invalidSignature`, `invalidEventId`, `signingFailed`, `verificationFailed`, `serializationFailed`, `invalidData`, `invalidMessageFormat`, `connectionFailed(String)`, `notConnected`, `subscriptionNotFound(String)`, `relayError(String)`, `timeout`, `invalidHex`, `invalidBech32`, `unknownPrefix(String)`, `encryptionFailed`, `decryptionFailed`, `unsupportedEncryptionVersion(UInt8)`, `invalidPayloadFormat`, `hmacVerificationFailed`, `invalidPadding`, `invalidMnemonic`, `invalidMnemonicWord(String)`, `invalidMnemonicChecksum`, `randomGenerationFailed`.
+
+## Supported NIPs
+
+- NIP-01: Basic protocol (events, filters, subscriptions, publishing)
+- NIP-02: Contact list and petnames
+- NIP-03: OpenTimestamps attestations
+- NIP-05: DNS-based internet identifiers
+- NIP-06: BIP-39 key derivation (m/44'/1237'/account'/0/0)
+- NIP-17: Private direct messages with gift wrap
+- NIP-19: bech32-encoded entities (npub, nsec)
+- NIP-20: Command results (OK messages)
+- NIP-42: Relay authentication (AUTH message parsing)
+- NIP-44: Versioned encryption v2 (ECDH + HKDF + ChaCha20 + HMAC-SHA256)
+- NIP-59: Gift wrap (rumor > seal > gift wrap with randomized timestamps)
+
+## Links
+
+- GitHub: https://github.com/yysskk/swift-nostr-client
+- API Documentation: https://yysskk.github.io/swift-nostr-client/documentation/nostrclient
+- License: MIT

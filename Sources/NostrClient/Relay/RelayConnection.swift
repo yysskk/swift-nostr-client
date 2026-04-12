@@ -42,7 +42,7 @@ public actor RelayConnection {
     private var stateChangeContinuations: [UUID: AsyncStream<RelayConnectionState>.Continuation] = [:]
 
     /// Pending continuations waiting for OK response after publish (keyed by event id)
-    private var pendingPublishWaiters: [String: CheckedContinuation<Void, Error>] = [:]
+    private var pendingPublishWaiters: [String: AsyncThrowingStream<Void, Error>.Continuation] = [:]
 
     public init(url: URL, urlSession: URLSession = .shared, config: RelayConnectionConfig = .default) {
         self.url = url
@@ -132,7 +132,7 @@ public actor RelayConnection {
         webSocketTask = nil
         subscriptions.removeAll()
         for (_, waiter) in pendingPublishWaiters {
-            waiter.resume(throwing: NostrError.notConnected)
+            waiter.finish(throwing: NostrError.notConnected)
         }
         pendingPublishWaiters.removeAll()
         updateState(.disconnected)
@@ -190,30 +190,41 @@ public actor RelayConnection {
     /// Publishes an event to the relay and waits for OK from the relay.
     /// Throws if the relay responds with accepted: false or if no OK is received within the operation timeout.
     public func publish(_ event: Event) async throws {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            pendingPublishWaiters[event.id] = cont
+        let (stream, continuation) = AsyncThrowingStream<Void, Error>.makeStream()
+        pendingPublishWaiters[event.id] = continuation
 
-            Task {
-                do {
-                    try await self.send(.event(event))
-                } catch {
-                    if let waiter = await self.removePublishWaiter(eventId: event.id) {
-                        waiter.resume(throwing: error)
-                    }
+        do {
+            try await send(.event(event))
+        } catch {
+            pendingPublishWaiters.removeValue(forKey: event.id)
+            continuation.finish()
+            throw error
+        }
+
+        defer {
+            removePublishWaiter(eventId: event.id)?.finish()
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for try await _ in stream {
+                    return
                 }
             }
 
-            Task {
-                try? await Task.sleep(for: .seconds(self.config.operationTimeout))
-                if let waiter = await self.removePublishWaiter(eventId: event.id) {
-                    waiter.resume(throwing: NostrError.timeout)
-                }
+            group.addTask {
+                try await Task.sleep(for: .seconds(self.config.operationTimeout))
+                throw NostrError.timeout
             }
+
+            try await group.next()
+            group.cancelAll()
         }
     }
 
     /// Removes and returns the publish waiter for the given event id (called from within the actor).
-    private func removePublishWaiter(eventId: String) -> CheckedContinuation<Void, Error>? {
+    @discardableResult
+    private func removePublishWaiter(eventId: String) -> AsyncThrowingStream<Void, Error>.Continuation? {
         pendingPublishWaiters.removeValue(forKey: eventId)
     }
 
@@ -324,9 +335,9 @@ public actor RelayConnection {
                             if case .ok(let eventId, let accepted, let message) = relayMessage {
                                 if let waiter = await self.removePublishWaiter(eventId: eventId) {
                                     if accepted {
-                                        waiter.resume(returning: ())
+                                        waiter.finish()
                                     } else {
-                                        waiter.resume(throwing: NostrError.relayError("Relay rejected event \(eventId): \(message)"))
+                                        waiter.finish(throwing: NostrError.relayError("Relay rejected event \(eventId): \(message)"))
                                     }
                                 }
                             }
