@@ -12,7 +12,7 @@ NostrClient implements NIP-17 private direct messages using NIP-44 encryption an
 try await client.setNsec("nsec1...")
 
 try await client.sendDirectMessage(
-    content: "Hello privately!",
+    "Hello privately!",
     to: "recipientPubkeyHex"
 )
 ```
@@ -20,7 +20,8 @@ try await client.sendDirectMessage(
 ### Receiving
 
 ```swift
-try await client.subscribeToDirectMessages { dm in
+try await client.subscribeToDirectMessages { event in
+    let dm = try await client.parseDirectMessage(event)
     print("From: \(dm.senderPubkey)")
     print("Content: \(dm.content)")
 }
@@ -49,8 +50,8 @@ let sealed = try SealedMessage.seal(
 )
 
 // Open a sealed message
-let plaintext = try SealedMessage.open(
-    from: sealedPayload,
+let plaintext = try sealed.open(
+    from: senderPubkey,
     using: recipientKeyPair
 )
 

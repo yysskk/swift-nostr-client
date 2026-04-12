@@ -46,7 +46,7 @@ try await client.connect()
 let event = try await client.publishTextNote(content: "Hello, Nostr!")
 
 // Subscribe to events
-try await client.subscribeToGlobalFeed(limit: 50) { subscriptionEvent in
+try await client.subscribeToGlobalFeed(limit: 50, eventHandler: { subscriptionEvent in
     switch subscriptionEvent {
     case .event(let relayURL, let event):
         print("[\(relayURL)] \(event.content)")
@@ -59,7 +59,7 @@ try await client.subscribeToGlobalFeed(limit: 50) { subscriptionEvent in
     case .auth(let relayURL, let challenge):
         print("[\(relayURL)] Auth challenge: \(challenge)")
     }
-}
+})
 ```
 
 ## NostrClient Actor
@@ -119,8 +119,8 @@ let filter = Filter(kinds: [1], authors: ["pubkey1", "pubkey2"], limit: 100)
 let subId = try await client.subscribe(filters: [filter]) { event in }
 
 // Unsubscribe
-try await client.unsubscribe(subscriptionId: subId)
-try await client.unsubscribeAll()
+await client.unsubscribe(subscriptionId: subId)
+await client.unsubscribeAll()
 ```
 
 ### One-Shot Fetches
@@ -137,10 +137,11 @@ let metadata = try await client.fetchMetadata(pubkey: "...")
 
 ```swift
 // Send
-try await client.sendDirectMessage(content: "Hello!", to: "recipientPubkey")
+try await client.sendDirectMessage("Hello!", to: "recipientPubkey")
 
 // Subscribe to incoming DMs
-try await client.subscribeToDirectMessages { dm in
+try await client.subscribeToDirectMessages { event in
+    let dm = try await client.parseDirectMessage(event)
     print("From: \(dm.senderPubkey), Content: \(dm.content)")
 }
 
@@ -419,7 +420,7 @@ let sealed = try SealedMessage.seal("message", for: recipientPubkey, using: send
 print(sealed.payload)  // base64-encoded
 
 // Open
-let plaintext = try SealedMessage.open(from: sealedPayload, using: recipientKeyPair)
+let plaintext = try sealed.open(from: senderPubkey, using: recipientKeyPair)
 ```
 
 ## GiftWrap

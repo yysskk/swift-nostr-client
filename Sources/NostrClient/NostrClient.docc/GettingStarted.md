@@ -84,7 +84,7 @@ try await client.subscribe(filters: [filter]) { event in
 }
 
 // Unsubscribe
-try await client.unsubscribe(subscriptionId: subId)
+await client.unsubscribe(subscriptionId: subId)
 ```
 
 ## Fetch Events
