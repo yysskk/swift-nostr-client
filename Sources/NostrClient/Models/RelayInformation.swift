@@ -392,6 +392,12 @@ public extension RelayInformation {
         do {
             (data, urlResponse) = try await urlSession.data(for: request)
         } catch {
+            if error is CancellationError || Task.isCancelled {
+                throw error
+            }
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                throw CancellationError()
+            }
             throw FetchError.networkError(error.localizedDescription)
         }
 

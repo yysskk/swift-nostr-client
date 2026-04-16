@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import NostrClient
 
-@Suite("RelayInformation Tests (NIP-11)")
+@Suite("RelayInformation Tests (NIP-11)", .serialized)
 struct RelayInformationTests {
 
     // MARK: - URL Conversion Tests
@@ -435,4 +435,283 @@ struct RelayInformationTests {
         #expect(info1 == info2)
         #expect(info1 != info3)
     }
+
+    // MARK: - HTTP Fetch Tests (URLProtocol mock)
+
+    @Test("Fetch sends GET to converted https URL with nostr+json Accept header")
+    func fetchSendsCorrectRequest() async throws {
+        let relayURL = URL(string: "wss://relay.example.com/ws?token=abc")!
+        let body = Data(#"{"name":"mocked"}"#.utf8)
+
+        let captured = try await withMockURLSession(
+            response: .success(status: 200, body: body)
+        ) { session in
+            _ = try await RelayInformation.fetch(from: relayURL, urlSession: session)
+        }
+
+        let request = try #require(captured.request)
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.absoluteString == "https://relay.example.com/ws?token=abc")
+        #expect(request.value(forHTTPHeaderField: "Accept") == "application/nostr+json")
+    }
+
+    @Test("Fetch decodes successful 200 response")
+    func fetchDecodesSuccessfulResponse() async throws {
+        let body = Data(#"""
+        {"name":"Mock Relay","supported_nips":[1,11],"limitation":{"auth_required":true}}
+        """#.utf8)
+
+        let info: RelayInformation = try await withMockURLSession(
+            response: .success(status: 200, body: body)
+        ) { session in
+            try await RelayInformation.fetch(
+                from: URL(string: "wss://relay.example.com")!,
+                urlSession: session
+            )
+        }.returnValue
+
+        #expect(info.name == "Mock Relay")
+        #expect(info.supportedNIPs == [1, 11])
+        #expect(info.limitation?.authRequired == true)
+    }
+
+    @Test("Fetch throws invalidResponse on non-2xx status")
+    func fetchThrowsInvalidResponseOnNon2xx() async {
+        for status in [400, 404, 500, 503] {
+            do {
+                _ = try await withMockURLSession(
+                    response: .success(status: status, body: Data("{}".utf8))
+                ) { session in
+                    try await RelayInformation.fetch(
+                        from: URL(string: "wss://relay.example.com")!,
+                        urlSession: session
+                    )
+                }.returnValue
+                Issue.record("Expected error for status \(status)")
+            } catch let error as RelayInformation.FetchError {
+                if case .invalidResponse = error {
+                    // Expected
+                } else {
+                    Issue.record("Unexpected FetchError for status \(status): \(error)")
+                }
+            } catch {
+                Issue.record("Unexpected error type for status \(status): \(error)")
+            }
+        }
+    }
+
+    @Test("Fetch throws decodingFailed on invalid JSON")
+    func fetchThrowsDecodingFailedOnInvalidJSON() async {
+        do {
+            _ = try await withMockURLSession(
+                response: .success(status: 200, body: Data("not json at all".utf8))
+            ) { session in
+                try await RelayInformation.fetch(
+                    from: URL(string: "wss://relay.example.com")!,
+                    urlSession: session
+                )
+            }.returnValue
+            Issue.record("Expected error to be thrown")
+        } catch let error as RelayInformation.FetchError {
+            if case .decodingFailed = error {
+                // Expected
+            } else {
+                Issue.record("Unexpected FetchError: \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    @Test("Fetch throws decodingFailed when JSON has wrong field types")
+    func fetchThrowsDecodingFailedOnTypeMismatch() async {
+        // supported_nips should be [Int] — give it [String] instead
+        let body = Data(#"{"supported_nips":["one","two"]}"#.utf8)
+        do {
+            _ = try await withMockURLSession(
+                response: .success(status: 200, body: body)
+            ) { session in
+                try await RelayInformation.fetch(
+                    from: URL(string: "wss://relay.example.com")!,
+                    urlSession: session
+                )
+            }.returnValue
+            Issue.record("Expected error to be thrown")
+        } catch let error as RelayInformation.FetchError {
+            if case .decodingFailed = error {
+                // Expected
+            } else {
+                Issue.record("Unexpected FetchError: \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    @Test("Fetch maps URLSession errors to networkError")
+    func fetchMapsURLErrorsToNetworkError() async {
+        do {
+            _ = try await withMockURLSession(
+                response: .failure(URLError(.cannotConnectToHost))
+            ) { session in
+                try await RelayInformation.fetch(
+                    from: URL(string: "wss://relay.example.com")!,
+                    urlSession: session
+                )
+            }.returnValue
+            Issue.record("Expected error to be thrown")
+        } catch let error as RelayInformation.FetchError {
+            if case .networkError = error {
+                // Expected
+            } else {
+                Issue.record("Unexpected FetchError: \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    @Test("Fetch remaps URLError(.cancelled) to CancellationError")
+    func fetchPropagatesCancellation() async {
+        // URLSession surfaces task cancellation as URLError(.cancelled); we
+        // remap it to CancellationError so callers can use standard Swift
+        // Concurrency cancellation handling instead of receiving it disguised
+        // as a generic network error.
+        do {
+            _ = try await withMockURLSession(
+                response: .failure(URLError(.cancelled))
+            ) { session in
+                try await RelayInformation.fetch(
+                    from: URL(string: "wss://relay.example.com")!,
+                    urlSession: session
+                )
+            }.returnValue
+            Issue.record("Expected error to be thrown")
+        } catch is CancellationError {
+            // Expected — URLError(.cancelled) is remapped to CancellationError
+        } catch {
+            Issue.record("Unexpected error type: \(error) (expected CancellationError)")
+        }
+    }
+}
+
+// MARK: - URLProtocol Mock Infrastructure
+
+/// Captured request + the value returned by the closure under test.
+private struct MockInvocation<Value> {
+    let request: URLRequest?
+    let returnValue: Value
+}
+
+private enum MockResponse {
+    case success(status: Int, body: Data)
+    case failure(Error)
+}
+
+/// Runs `body` with a URLSession backed by `MockURLProtocol`, returning both the
+/// captured URLRequest and the closure's return value.
+@discardableResult
+private func withMockURLSession<Value>(
+    response: MockResponse,
+    body: (URLSession) async throws -> Value
+) async throws -> MockInvocation<Value> {
+    let handlerID = MockURLProtocol.register(response: response)
+    defer { MockURLProtocol.unregister(handlerID: handlerID) }
+
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [MockURLProtocol.self]
+    let session = URLSession(configuration: config)
+    defer { session.invalidateAndCancel() }
+
+    let value = try await body(session)
+    let captured = MockURLProtocol.capturedRequest(for: handlerID)
+    return MockInvocation(request: captured, returnValue: value)
+}
+
+/// Thread-safe storage for MockURLProtocol handlers, keyed by ID.
+private final class MockURLProtocolRegistry: @unchecked Sendable {
+    static let shared = MockURLProtocolRegistry()
+
+    private let lock = NSLock()
+    private var handlers: [UUID: MockResponse] = [:]
+    private var captured: [UUID: URLRequest] = [:]
+    private var currentID: UUID?
+
+    func register(_ response: MockResponse) -> UUID {
+        lock.lock()
+        defer { lock.unlock() }
+        let id = UUID()
+        handlers[id] = response
+        currentID = id
+        return id
+    }
+
+    func unregister(_ id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        handlers.removeValue(forKey: id)
+        captured.removeValue(forKey: id)
+        if currentID == id { currentID = nil }
+    }
+
+    func currentHandler() -> (UUID, MockResponse)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let id = currentID, let handler = handlers[id] else { return nil }
+        return (id, handler)
+    }
+
+    func recordRequest(_ request: URLRequest, for id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        captured[id] = request
+    }
+
+    func capturedRequest(for id: UUID) -> URLRequest? {
+        lock.lock()
+        defer { lock.unlock() }
+        return captured[id]
+    }
+}
+
+private final class MockURLProtocol: URLProtocol {
+    static func register(response: MockResponse) -> UUID {
+        MockURLProtocolRegistry.shared.register(response)
+    }
+
+    static func unregister(handlerID: UUID) {
+        MockURLProtocolRegistry.shared.unregister(handlerID)
+    }
+
+    static func capturedRequest(for handlerID: UUID) -> URLRequest? {
+        MockURLProtocolRegistry.shared.capturedRequest(for: handlerID)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let (id, response) = MockURLProtocolRegistry.shared.currentHandler() else {
+            client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
+            return
+        }
+        MockURLProtocolRegistry.shared.recordRequest(request, for: id)
+
+        switch response {
+        case .success(let status, let body):
+            let http = HTTPURLResponse(
+                url: request.url!,
+                statusCode: status,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/nostr+json"]
+            )!
+            client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: body)
+            client?.urlProtocolDidFinishLoading(self)
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
