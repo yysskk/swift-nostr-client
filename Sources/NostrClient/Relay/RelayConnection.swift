@@ -450,3 +450,20 @@ extension RelayConnection: Hashable {
         hasher.combine(url)
     }
 }
+
+// MARK: - NIP-11
+public extension RelayConnection {
+    /// Fetches the NIP-11 Relay Information Document for this relay.
+    ///
+    /// This performs an HTTP GET request to the relay's URL (with the scheme
+    /// converted from `wss://`/`ws://` to `https://`/`http://`) and works
+    /// independently of the WebSocket connection state.
+    ///
+    /// - Parameter urlSession: The URL session to use (defaults to `.shared`).
+    /// - Returns: The decoded ``RelayInformation``.
+    /// - Throws: ``RelayInformation/FetchError`` on URL, network, or
+    ///   decoding errors.
+    nonisolated func fetchInformation(urlSession: URLSession = .shared) async throws -> RelayInformation {
+        try await RelayInformation.fetch(from: url, urlSession: urlSession)
+    }
+}

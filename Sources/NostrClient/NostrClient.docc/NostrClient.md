@@ -69,6 +69,7 @@ let event = try await client.publishTextNote(content: "Hello, Nostr!")
 
 - ``Contact``
 - ``InternetIdentifier``
+- ``RelayInformation``
 - ``OpenTimestamps``
 - ``NostrError``
 - ``Bech32``

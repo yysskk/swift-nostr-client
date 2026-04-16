@@ -537,6 +537,28 @@ let relays = try await InternetIdentifier.lookupRelays("alice@example.com")
 try await "alice@example.com".verifyAsInternetIdentifier()
 ```
 
+## RelayInformation
+
+NIP-11 Relay Information Document (struct: Codable, Sendable, Hashable). All fields optional.
+
+```swift
+// Fetch from a URL
+let info = try await RelayInformation.fetch(fromRelayURLString: "wss://relay.damus.io")
+print(info.name)            // String?
+print(info.supportedNIPs)   // [Int]?
+print(info.limitation?.authRequired)
+
+// From an existing RelayConnection
+let info = try await connection.fetchInformation()
+
+// URL scheme conversion helper (wss->https, ws->http)
+let httpURL = RelayInformation.informationURL(from: relayURL)
+```
+
+Nested types: `Limitation`, `Fees`, `FeeSchedule`, `Retention`, `KindSpec` (`.single(Int)` / `.range(Int, Int)`).
+
+Errors: `FetchError.invalidRelayURL(String)`, `.networkError(String)`, `.invalidResponse`, `.decodingFailed(String)`.
+
 ## OpenTimestamps
 
 OpenTimestamps attestation support for NIP-03 (struct: Sendable, Hashable).
@@ -644,6 +666,7 @@ Cases: `invalidPrivateKey`, `invalidPublicKey`, `invalidSignature`, `invalidEven
 - NIP-03: OpenTimestamps attestations
 - NIP-05: DNS-based internet identifiers
 - NIP-06: BIP-39 key derivation (m/44'/1237'/account'/0/0)
+- NIP-11: Relay information document
 - NIP-17: Private direct messages with gift wrap
 - NIP-19: bech32-encoded entities (npub, nsec)
 - NIP-20: Command results (OK messages)
