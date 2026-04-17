@@ -1,5 +1,8 @@
 import Testing
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import NostrClient
 
 @Suite("RelayInformation Tests (NIP-11)", .serialized)
