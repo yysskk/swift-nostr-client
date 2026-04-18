@@ -36,7 +36,7 @@ jobs:
           cp llms.txt ./docs/llms.txt
           cp llms-full.txt ./docs/llms-full.txt
 
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs
 
