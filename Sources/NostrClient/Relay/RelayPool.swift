@@ -107,37 +107,89 @@ public actor RelayPool {
 
     /// Publishes an event to connected relays.
     /// By default broadcasts to all relays; pass `relayURLs` to target a subset (NIP-65 outbox routing).
-    /// Succeeds if at least one targeted relay accepts the event.
-    public func publish(_ event: Event, to relayURLs: Set<URL>? = nil) async throws {
+    ///
+    /// The event is sent to every targeted relay; `strategy` controls how many
+    /// acknowledgments to wait for before returning (default: the pool config's
+    /// ``RelayPoolConfig/defaultPublishStrategy``, `.firstAck`). Returning early never
+    /// cancels in-flight sends — slower relays still receive the event for redundancy,
+    /// and their pending OK-waits clean themselves up on their own timeouts.
+    ///
+    /// Publishing to an empty target set is a no-op.
+    /// - Throws: The last relay error if no targeted relay accepts the event, or
+    ///   ``NostrError/relayError(_:)`` if a `.quorum` strategy cannot be satisfied.
+    public func publish(
+        _ event: Event,
+        to relayURLs: Set<URL>? = nil,
+        strategy: PublishStrategy? = nil
+    ) async throws {
+        let connections = targetConnections(relayURLs)
+        guard !connections.isEmpty else { return }
+
+        let strategy = strategy ?? config.defaultPublishStrategy
+        let requiredAcks = strategy.requiredAcks(targetCount: connections.count)
+
+        let (results, continuation) = AsyncStream<Result<Void, Error>>.makeStream()
+        defer { continuation.finish() }
+
+        // Deliberately unstructured: these tasks must survive an early return so the
+        // EVENT frame is still delivered to every targeted relay, and so a cancelled
+        // caller doesn't abort sends that are already in flight.
+        for connection in connections {
+            Task {
+                do {
+                    try await connection.publish(event)
+                    continuation.yield(.success(()))
+                } catch {
+                    continuation.yield(.failure(error))
+                }
+            }
+        }
+
         var successCount = 0
+        var settledCount = 0
         var lastError: Error?
 
-        await withTaskGroup(of: Result<Void, Error>.self) { group in
-            for connection in targetConnections(relayURLs) {
-                group.addTask {
-                    do {
-                        try await connection.publish(event)
-                        return .success(())
-                    } catch {
-                        return .failure(error)
-                    }
-                }
+        for await result in results {
+            settledCount += 1
+            switch result {
+            case .success:
+                successCount += 1
+            case .failure(let error):
+                lastError = error
             }
 
-            for await result in group {
-                switch result {
-                case .success:
-                    successCount += 1
-                case .failure(let error):
-                    lastError = error
-                }
+            if let requiredAcks, successCount >= requiredAcks {
+                return
+            }
+            if settledCount == connections.count {
+                break
             }
         }
 
-        // Succeed if at least one relay accepted the event
-        if successCount == 0, let error = lastError {
+        // The stream only ends before all relays settle when the caller is cancelled;
+        // surface that instead of silently returning as success.
+        if settledCount < connections.count {
+            try Task.checkCancellation()
+        }
+
+        if let error = Self.publishFailure(
+            successCount: successCount, requiredAcks: requiredAcks, lastError: lastError)
+        {
             throw error
         }
+    }
+
+    /// Decides whether a fully settled publish failed.
+    /// Succeeds if at least one relay accepted the event and any required quorum was met.
+    static func publishFailure(successCount: Int, requiredAcks: Int?, lastError: Error?) -> Error? {
+        if successCount == 0, let error = lastError {
+            return error
+        }
+        if let requiredAcks, successCount < requiredAcks {
+            return NostrError.relayError(
+                "Publish quorum not met: \(successCount)/\(requiredAcks) relays acknowledged")
+        }
+        return nil
     }
 
     /// Subscribes to events on all relays.
