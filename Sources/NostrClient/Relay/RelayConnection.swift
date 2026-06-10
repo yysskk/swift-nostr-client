@@ -89,7 +89,12 @@ public actor RelayConnection {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask {
                     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        // sendPing can invoke its handler multiple times when the socket is
+                        // cancelled/aborted (e.g. errno 53 "Software caused connection abort"),
+                        // so guard the resume to fire exactly once.
+                        let resumeGuard = ResumeOnceGuard()
                         task.sendPing { error in
+                            guard resumeGuard.claim() else { return }
                             if let error = error {
                                 continuation.resume(throwing: error)
                             } else {
