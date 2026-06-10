@@ -129,6 +129,7 @@ public actor RelayPool {
         let requiredAcks = strategy.requiredAcks(targetCount: connections.count)
 
         let (results, continuation) = AsyncStream<Result<Void, Error>>.makeStream()
+        defer { continuation.finish() }
 
         // Deliberately unstructured: these tasks must survive an early return so the
         // EVENT frame is still delivered to every targeted relay, and so a cancelled
@@ -171,14 +172,24 @@ public actor RelayPool {
             try Task.checkCancellation()
         }
 
-        // Succeed if at least one relay accepted the event
-        if successCount == 0, let error = lastError {
+        if let error = Self.publishFailure(
+            successCount: successCount, requiredAcks: requiredAcks, lastError: lastError)
+        {
             throw error
         }
+    }
+
+    /// Decides whether a fully settled publish failed.
+    /// Succeeds if at least one relay accepted the event and any required quorum was met.
+    static func publishFailure(successCount: Int, requiredAcks: Int?, lastError: Error?) -> Error? {
+        if successCount == 0, let error = lastError {
+            return error
+        }
         if let requiredAcks, successCount < requiredAcks {
-            throw NostrError.relayError(
+            return NostrError.relayError(
                 "Publish quorum not met: \(successCount)/\(requiredAcks) relays acknowledged")
         }
+        return nil
     }
 
     /// Subscribes to events on all relays.

@@ -49,6 +49,7 @@ struct PublishStrategyTests {
     func quorumClampsToAtLeastOne() {
         #expect(PublishStrategy.quorum(0).requiredAcks(targetCount: 3) == 1)
         #expect(PublishStrategy.quorum(-5).requiredAcks(targetCount: 3) == 1)
+        #expect(PublishStrategy.quorum(5).requiredAcks(targetCount: 0) == 1)
     }
 
     @Test("allSettled waits for every target")
@@ -101,5 +102,35 @@ struct PublishStrategyTests {
         await #expect(throws: NostrError.notConnected) {
             try await pool.publish(self.dummyEvent, strategy: strategy)
         }
+    }
+
+    // MARK: - Settled-publish failure evaluation
+
+    @Test("all relays failing surfaces the last error")
+    func publishFailureSurfacesLastError() {
+        let error = RelayPool.publishFailure(
+            successCount: 0, requiredAcks: 1, lastError: NostrError.timeout)
+        #expect(error as? NostrError == .timeout)
+    }
+
+    @Test("partial success below the quorum fails with the quorum error")
+    func publishFailureWhenQuorumNotMet() {
+        let error = RelayPool.publishFailure(
+            successCount: 1, requiredAcks: 2, lastError: NostrError.timeout)
+        #expect(error as? NostrError == .relayError("Publish quorum not met: 1/2 relays acknowledged"))
+    }
+
+    @Test("meeting the quorum succeeds despite other failures")
+    func publishFailureNilWhenQuorumMet() {
+        let error = RelayPool.publishFailure(
+            successCount: 2, requiredAcks: 2, lastError: NostrError.timeout)
+        #expect(error == nil)
+    }
+
+    @Test("allSettled succeeds when at least one relay accepted")
+    func publishFailureNilForAllSettledWithOneSuccess() {
+        let error = RelayPool.publishFailure(
+            successCount: 1, requiredAcks: nil, lastError: NostrError.timeout)
+        #expect(error == nil)
     }
 }

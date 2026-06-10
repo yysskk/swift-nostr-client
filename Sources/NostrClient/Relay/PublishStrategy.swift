@@ -19,13 +19,13 @@ public enum PublishStrategy: Sendable, Equatable {
     case allSettled
 
     /// The number of acknowledgments required before returning early,
-    /// or `nil` to wait for all targets to settle.
+    /// or `nil` to wait for all targets to settle. Never returns below 1.
     func requiredAcks(targetCount: Int) -> Int? {
         switch self {
         case .firstAck:
             return 1
         case .quorum(let count):
-            return min(max(count, 1), targetCount)
+            return max(1, min(count, targetCount))
         case .allSettled:
             return nil
         }
