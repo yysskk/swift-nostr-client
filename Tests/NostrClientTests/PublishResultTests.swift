@@ -21,6 +21,17 @@ struct PublishResultTests {
         #expect(result.acceptedRelays == [urlA])
         #expect(result.failedRelays == [urlB])
         #expect(result.pendingRelays == [urlC])
+        #expect(result.statuses[urlA] == .accepted)
+        #expect(result.statuses[urlC] == .pending)
+    }
+
+    @Test("statuses compare by case only")
+    func statusEquality() {
+        #expect(PublishRelayStatus.accepted == .accepted)
+        #expect(PublishRelayStatus.pending == .pending)
+        #expect(PublishRelayStatus.failed(NostrError.timeout) == .failed(NostrError.notConnected))
+        #expect(PublishRelayStatus.accepted != .pending)
+        #expect(PublishRelayStatus.failed(NostrError.timeout) != .accepted)
     }
 
     @Test("accessors are empty for an empty result")

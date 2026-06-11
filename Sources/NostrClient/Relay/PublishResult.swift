@@ -13,6 +13,19 @@ public enum PublishRelayStatus: Sendable {
     case pending
 }
 
+extension PublishRelayStatus: Equatable {
+    /// Compares by case only: two `.failed` values are equal regardless of the
+    /// underlying error (`Error` itself is not `Equatable`).
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.accepted, .accepted), (.failed, .failed), (.pending, .pending):
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 /// Summary of a publish across the targeted relays.
 ///
 /// Returned by ``RelayPool/publish(_:to:strategy:)`` so callers can drive
