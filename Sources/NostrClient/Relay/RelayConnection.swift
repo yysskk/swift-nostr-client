@@ -93,10 +93,14 @@ public actor RelayConnection {
         else { return }
 
         // Unstructured on purpose: one caller's cancellation must not abort the
-        // attempt other callers are waiting on.
-        let task = Task { try await performConnect() }
+        // attempt other callers are waiting on. The slot is cleared inside the
+        // task itself so it lives exactly as long as the attempt — clearing it
+        // from the caller would be tied to the caller's lifetime instead.
+        let task = Task {
+            defer { connectTask = nil }
+            try await performConnect()
+        }
         connectTask = task
-        defer { connectTask = nil }
         try await task.value
     }
 
