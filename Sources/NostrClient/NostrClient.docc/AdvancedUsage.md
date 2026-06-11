@@ -189,7 +189,9 @@ if let ots = event.openTimestamps {
 ```swift
 let config = RelayConnectionConfig(
     connectionTimeout: 10,
-    operationTimeout: 30,
+    sendTimeout: 10,
+    publishAckTimeout: 30,
+    pingInterval: 30,
     autoReconnect: true,
     maxReconnectAttempts: 10,
     initialReconnectDelay: 1,
@@ -198,6 +200,11 @@ let config = RelayConnectionConfig(
 )
 try await client.addRelay("wss://relay.damus.io", config: config)
 ```
+
+Liveness is detected with periodic WebSocket pings (`pingInterval`); an idle relay
+that simply has no messages to deliver is never torn down. The pong wait is bounded
+by `connectionTimeout`. The legacy combined `operationTimeout` is deprecated and maps
+to `sendTimeout`, `publishAckTimeout`, and `pingInterval`.
 
 ### Pool Configuration
 
