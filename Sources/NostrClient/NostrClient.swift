@@ -492,14 +492,18 @@ public actor NostrClient {
             return (subscriptionId, expectedRelayURLs)
         } catch {
             subscriptions.removeValue(forKey: subscriptionId)
+            // Drop the pool-side handler and message tasks registered before the failure.
+            await relayPool.unsubscribe(subscriptionId: subscriptionId)
             throw error
         }
     }
 
-    /// Unsubscribes from a subscription
+    /// Unsubscribes from a subscription.
+    /// No-op for unknown IDs, so the re-entrant call triggered by finishing the
+    /// continuation (onTermination → unsubscribe) cannot send a second CLOSE.
     public func unsubscribe(subscriptionId: String) async {
-        let subscription = subscriptions.removeValue(forKey: subscriptionId)
-        subscription?.continuation?.finish()
+        guard let subscription = subscriptions.removeValue(forKey: subscriptionId) else { return }
+        subscription.continuation?.finish()
         await relayPool.unsubscribe(subscriptionId: subscriptionId)
     }
 
