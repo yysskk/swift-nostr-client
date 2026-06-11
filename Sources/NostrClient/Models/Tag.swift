@@ -174,7 +174,7 @@ extension Event {
 
     /// The first value of the first tag with the given name.
     public func firstTagValue(named name: String) -> String? {
-        tags.first { $0.first == name && $0.count >= 2 }?[1]
+        tags(named: name).first?.primaryValue
     }
 
     /// The event IDs referenced by "e" tags.

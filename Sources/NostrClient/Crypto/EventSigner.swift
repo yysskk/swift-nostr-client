@@ -144,7 +144,7 @@ public struct EventSigner: Sendable {
     public func signRelayListMetadata(_ relayList: RelayListMetadata) throws -> Event {
         let unsigned = UnsignedEvent(
             pubkey: publicKey,
-            kind: Event.Kind.relayListMetadata.rawValue,
+            kind: .relayListMetadata,
             rawTags: relayList.toTags(),
             content: ""
         )

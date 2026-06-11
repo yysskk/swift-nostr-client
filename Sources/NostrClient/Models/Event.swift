@@ -143,6 +143,17 @@ public struct UnsignedEvent: Sendable {
         self.content = content
     }
 
+    /// Builds an unsigned event of a known kind from raw NIP-01 tag arrays.
+    public init(
+        pubkey: String,
+        createdAt: Int64 = Int64(Date().timeIntervalSince1970),
+        kind: Event.Kind,
+        rawTags: [[String]],
+        content: String
+    ) {
+        self.init(pubkey: pubkey, createdAt: createdAt, kind: kind.rawValue, rawTags: rawTags, content: content)
+    }
+
     /// Serializes the event for hashing according to NIP-01
     public func serializedForHashing() throws -> Data {
         let serializable: [Any] = [
