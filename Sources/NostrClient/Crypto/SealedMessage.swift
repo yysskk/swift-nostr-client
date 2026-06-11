@@ -163,7 +163,7 @@ public struct SealedMessage: Sendable {
         // Compute ECDH shared point
         // The sharedSecret in compressed format is: version (1 byte) + x-coordinate (32 bytes)
         // NIP-44 needs only the x-coordinate, so skip the version byte
-        let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: publicKey, format: .compressed)
+        let sharedSecret = privateKey.sharedSecretFromKeyAgreement(with: publicKey, format: .compressed)
         let sharedX = sharedSecret.withUnsafeBytes { bytes in
             Data(bytes.dropFirst())
         }
