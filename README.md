@@ -78,15 +78,14 @@ let nprofile = try NProfile(publicKey: keyPair.publicKeyHex, relays: ["wss://rel
 ```swift
 let client = NostrClient()
 
-// Add relays
-try await client.addRelays([
+// Add relays and connect in one step
+try await client.connect(to: [
     "wss://relay.damus.io",
     "wss://nos.lol",
     "wss://relay.nostr.band"
 ])
 
-// Connect
-try await client.connect()
+// Or separately: addRelays(_:) then connect()
 ```
 
 ### Publish Events

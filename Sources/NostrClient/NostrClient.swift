@@ -71,6 +71,19 @@ public actor NostrClient {
         try await relayPool.connectAll()
     }
 
+    /// Adds the given relays and connects to all relays in the pool —
+    /// the one-step form of `addRelays` followed by `connect()`.
+    ///
+    /// ```swift
+    /// try await client.connect(to: ["wss://relay.damus.io", "wss://nos.lol"])
+    /// ```
+    /// - Throws: ``NostrError/connectionFailed(_:)`` only if every relay in the
+    ///   pool fails to connect; partial failures are tolerated.
+    public func connect(to urlStrings: [String]) async throws {
+        try await addRelays(urlStrings)
+        try await connect()
+    }
+
     /// Disconnects from all relays
     public func disconnect() async {
         await relayPool.disconnectAll()
