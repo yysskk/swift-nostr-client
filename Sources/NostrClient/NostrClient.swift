@@ -236,8 +236,10 @@ public actor NostrClient {
     ///   - recipientPubkey: The recipient's public key (hex)
     ///   - subject: Optional conversation subject
     ///   - replyTo: Optional event ID to reply to
-    ///   - strategy: How many relay acknowledgments to wait for before returning
-    ///     (default: the pool config's ``RelayPoolConfig/defaultPublishStrategy``).
+    ///   - strategy: How many relay acknowledgments to wait for on the recipient
+    ///     gift wrap before returning (default: the pool config's
+    ///     ``RelayPoolConfig/defaultPublishStrategy``). The best-effort self-copy
+    ///     always uses the pool default so it never blocks the send.
     /// - Returns: The shared rumor, both gift wraps, and the per-relay publish
     ///   outcomes. The rumor's `id` is the key for matching the message when it
     ///   echoes back from a relay.
@@ -261,7 +263,7 @@ public actor NostrClient {
             replyTo: replyTo
         )
 
-        async let selfCopyDelivery = publishBestEffort(result.selfGiftWrap, strategy: strategy)
+        async let selfCopyDelivery = publishBestEffort(result.selfGiftWrap)
         let recipientResult = try await relayPool.publish(result.recipientGiftWrap, strategy: strategy)
         let selfCopyResult = await selfCopyDelivery
 
@@ -275,9 +277,11 @@ public actor NostrClient {
     }
 
     /// Publishes an event, swallowing failures (used for non-fatal NIP-17 self-copies).
+    /// Always uses the pool's default strategy so a caller-supplied strategy
+    /// never makes the best-effort publish block the primary send.
     /// - Returns: The per-relay outcome, or nil if the publish failed outright.
-    private func publishBestEffort(_ event: Event, strategy: PublishStrategy?) async -> PublishResult? {
-        try? await relayPool.publish(event, strategy: strategy)
+    private func publishBestEffort(_ event: Event) async -> PublishResult? {
+        try? await relayPool.publish(event)
     }
 
     /// Parses a received gift-wrapped direct message
