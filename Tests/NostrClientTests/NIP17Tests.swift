@@ -138,11 +138,11 @@ struct NIP17Tests {
         let bob = try KeyPair()
 
         let builder = DirectMessageBuilder(keyPair: alice)
-        let giftWrap = try builder.createMessage(
+        let giftWrap = try builder.createMessageWithSelfCopy(
             content: "Hello Bob!",
             to: bob.publicKeyHex,
             subject: "Test Subject"
-        )
+        ).recipientGiftWrap
 
         // Verify it's a gift wrap
         #expect(giftWrap.kind == Event.Kind.giftWrap.rawValue)
@@ -164,27 +164,43 @@ struct NIP17Tests {
         let builder = DirectMessageBuilder(keyPair: alice)
 
         // First message
-        let firstMessage = try builder.createMessage(
+        let firstMessage = try builder.createMessageWithSelfCopy(
             content: "First message",
             to: bob.publicKeyHex
-        )
+        ).recipientGiftWrap
 
         let parser = DirectMessageParser(keyPair: bob)
         let parsedFirst = try parser.parse(firstMessage)
 
         // Reply to first message
         let bobBuilder = DirectMessageBuilder(keyPair: bob)
-        let reply = try bobBuilder.createMessage(
+        let reply = try bobBuilder.createMessageWithSelfCopy(
             content: "Reply to first",
             to: alice.publicKeyHex,
             replyTo: parsedFirst.rumorId
-        )
+        ).recipientGiftWrap
 
         let aliceParser = DirectMessageParser(keyPair: alice)
         let parsedReply = try aliceParser.parse(reply)
 
         #expect(parsedReply.content == "Reply to first")
         #expect(parsedReply.replyTo == parsedFirst.rumorId)
+    }
+
+    @available(*, deprecated, message: "Exercises the deprecated createMessage API on purpose")
+    @Test("Deprecated createMessage still produces the recipient wrap")
+    func deprecatedCreateMessage() throws {
+        let alice = try KeyPair()
+        let bob = try KeyPair()
+
+        let giftWrap = try DirectMessageBuilder(keyPair: alice).createMessage(
+            content: "Legacy path",
+            to: bob.publicKeyHex
+        )
+
+        let message = try DirectMessageParser(keyPair: bob).parse(giftWrap)
+        #expect(message.content == "Legacy path")
+        #expect(message.senderPubkey == alice.publicKeyHex)
     }
 
     @Test("Group message creates multiple gift wraps")
@@ -322,11 +338,11 @@ struct NIP17Tests {
         let bob = try KeyPair()
 
         let builder = DirectMessageBuilder(keyPair: alice)
-        let giftWrap = try builder.createMessage(
+        let giftWrap = try builder.createMessageWithSelfCopy(
             content: "Test content",
             to: bob.publicKeyHex,
             subject: "Subject"
-        )
+        ).recipientGiftWrap
 
         let parser = DirectMessageParser(keyPair: bob)
         let message = try parser.parse(giftWrap)

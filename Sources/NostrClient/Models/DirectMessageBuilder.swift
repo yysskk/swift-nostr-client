@@ -8,13 +8,21 @@ public struct DirectMessageBuilder: Sendable {
         self.senderKeyPair = keyPair
     }
 
-    /// Creates a gift-wrapped direct message event ready for publishing
+    /// Creates a gift-wrapped direct message event ready for publishing.
+    ///
+    /// This only produces the recipient's wrap; NIP-17 also requires a self-copy
+    /// for sent history and multi-device sync, so prefer
+    /// ``createMessageWithSelfCopy(content:to:subject:replyTo:)``.
     /// - Parameters:
     ///   - content: The message content
     ///   - recipientPubkey: The recipient's public key (hex)
     ///   - subject: Optional conversation subject
     ///   - replyTo: Optional event ID to reply to
     /// - Returns: A gift-wrapped event for the recipient
+    @available(
+        *, deprecated, renamed: "createMessageWithSelfCopy",
+        message: "NIP-17 requires a self-copy; use createMessageWithSelfCopy instead."
+    )
     public func createMessage(
         content: String,
         to recipientPubkey: String,
