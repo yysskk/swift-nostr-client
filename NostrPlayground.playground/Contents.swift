@@ -146,15 +146,12 @@ print("""
 Task {
     let client = NostrClient()
 
-    // Add relays
-    try await client.addRelays([
+    // Add relays and connect in one step
+    try await client.connect(to: [
         "wss://relay.damus.io",
         "wss://nos.lol",
         "wss://relay.nostr.band"
     ])
-
-    // Connect to all relays
-    try await client.connect()
 
     // Set your private key
     try await client.setNsec("nsec1...")

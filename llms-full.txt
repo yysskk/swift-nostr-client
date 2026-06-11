@@ -38,9 +38,8 @@ let client = NostrClient()
 // Set signer
 try await client.setNsec("nsec1...")
 
-// Add relays and connect
-try await client.addRelays(["wss://relay.damus.io", "wss://nos.lol"])
-try await client.connect()
+// Add relays and connect in one step
+try await client.connect(to: ["wss://relay.damus.io", "wss://nos.lol"])
 
 // Publish a text note — returns the signed event plus the per-relay outcome
 let note = try await client.publishTextNote(content: "Hello, Nostr!")
@@ -89,6 +88,7 @@ try await client.addRelay("wss://relay.damus.io")
 try await client.addRelay("wss://relay.damus.io", config: customConfig)
 try await client.addRelays(["wss://relay1.example.com", "wss://relay2.example.com"])
 try await client.connect()
+try await client.connect(to: ["wss://relay.damus.io"])  // addRelays + connect in one step
 await client.disconnect()
 ```
 

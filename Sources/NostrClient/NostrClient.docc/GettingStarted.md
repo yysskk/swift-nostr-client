@@ -46,12 +46,12 @@ print("Mnemonic: \(mnemonic.phrase)")
 ```swift
 let client = NostrClient()
 
-try await client.addRelays([
+// Add relays and connect in one step
+try await client.connect(to: [
     "wss://relay.damus.io",
     "wss://nos.lol",
     "wss://relay.nostr.band"
 ])
-try await client.connect()
 ```
 
 ## Publish Events
