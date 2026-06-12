@@ -104,6 +104,12 @@ struct NIP42AuthRetryTests {
 
         try await NIP42TestSupport.pollUntil { self.eventFrames(in: mock).count == 1 }
         mock.deliver(.string("[\"OK\",\"\(note.id)\",false,\"auth-required: we only serve registered users\"]"))
+
+        // Hold the challenge back until the rejected publish is parked on the
+        // authentication outcome — otherwise the AUTH rejection can settle
+        // before the waiter registers and the publish would (correctly) fall
+        // back to the original rejection instead.
+        try await NIP42TestSupport.pollUntil { await connection.authenticationWaiterCount > 0 }
         mock.deliver(.string(#"["AUTH","challengestringhere"]"#))
 
         try await NIP42TestSupport.pollUntil { mock.sentTextFrames.contains { $0.hasPrefix("[\"AUTH\"") } }

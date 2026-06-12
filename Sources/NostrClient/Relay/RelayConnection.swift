@@ -104,6 +104,11 @@ public actor RelayConnection {
         !authenticatedPubkeys.isEmpty
     }
 
+    /// The number of callers currently parked in ``waitForAuthentication()`` (for tests).
+    var authenticationWaiterCount: Int {
+        authenticationWaiters.count
+    }
+
     /// Whether an authentication outcome is plausibly imminent: one already
     /// succeeded, one is in flight, or a responder is installed to answer the
     /// challenges the relay sends.
