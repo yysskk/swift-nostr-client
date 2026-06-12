@@ -86,9 +86,24 @@ public actor RelayConnection {
     /// relay issues on a fresh session are answered too.
     private var authenticationResponder: AuthenticationResponder?
 
+    /// Subscriptions the relay closed with `auth-required:`, re-requested
+    /// automatically after the next successful authentication (NIP-42).
+    private var subscriptionsAwaitingAuthentication: Set<String> = []
+
+    /// Continuations suspended in ``waitForAuthentication()``, settled by the
+    /// receive loop when an AUTH round-trip concludes.
+    private var authenticationWaiters: [UUID: AsyncThrowingStream<Void, Error>.Continuation] = [:]
+
     /// Whether at least one pubkey is authenticated on this connection (NIP-42).
     public var isAuthenticated: Bool {
         !authenticatedPubkeys.isEmpty
+    }
+
+    /// Whether an authentication outcome is plausibly imminent: one already
+    /// succeeded, one is in flight, or a responder is installed to answer the
+    /// challenges the relay sends.
+    private var canExpectAuthentication: Bool {
+        isAuthenticated || !pendingAuthentications.isEmpty || authenticationResponder != nil
     }
 
     public init(url: URL, urlSession: URLSession = .shared, config: RelayConnectionConfig = .default) {
@@ -212,13 +227,60 @@ public actor RelayConnection {
         updateState(.disconnected)
     }
 
-    /// Clears all NIP-42 state. Challenges and authenticated pubkeys are only
-    /// valid for a single WebSocket session, so this runs on every teardown
-    /// and before every (re)connection attempt.
+    /// Clears all NIP-42 session state. Challenges, authenticated pubkeys, and
+    /// auth-pending subscriptions are only valid for a single WebSocket
+    /// session, so this runs on every teardown and before every (re)connection
+    /// attempt. Waiters blocked on an authentication are failed: their session
+    /// is gone, and any re-authentication belongs to the next one.
     private func resetAuthenticationState() {
         authenticationChallenge = nil
         authenticatedPubkeys.removeAll()
         pendingAuthentications.removeAll()
+        subscriptionsAwaitingAuthentication.removeAll()
+        let waiters = authenticationWaiters.values
+        authenticationWaiters.removeAll()
+        for waiter in waiters {
+            waiter.finish(throwing: NostrError.notConnected)
+        }
+    }
+
+    /// Applies the outcome of an AUTH round-trip observed by the receive loop:
+    /// a success records the pubkey, wakes ``waitForAuthentication()`` callers,
+    /// and re-requests subscriptions the relay closed with `auth-required:`; a
+    /// rejection fails the waiters with the relay's status string.
+    private func settleAuthentication(pubkey: String, accepted: Bool, message: String) {
+        let waiters = authenticationWaiters.values
+        authenticationWaiters.removeAll()
+
+        guard accepted else {
+            for waiter in waiters {
+                waiter.finish(throwing: NostrError.authenticationFailed(message))
+            }
+            return
+        }
+
+        authenticatedPubkeys.insert(pubkey)
+        for waiter in waiters {
+            waiter.finish()
+        }
+        resubscribeAfterAuthentication()
+    }
+
+    /// Re-requests the subscriptions the relay closed with `auth-required:`.
+    /// Unstructured because it runs from the receive loop, which must not
+    /// block on the REQ sends; subscriptions unsubscribed in the meantime are
+    /// skipped.
+    private func resubscribeAfterAuthentication() {
+        let awaiting = subscriptionsAwaitingAuthentication
+        subscriptionsAwaitingAuthentication.removeAll()
+        guard !awaiting.isEmpty else { return }
+
+        Task {
+            for subscriptionId in awaiting {
+                guard let filters = subscriptions[subscriptionId] else { continue }
+                try? await subscribe(subscriptionId: subscriptionId, filters: filters)
+            }
+        }
     }
 
     /// Sends a client message to the relay
@@ -277,6 +339,11 @@ public actor RelayConnection {
     /// spending up to `connectionTimeout` on a reconnect attempt. Reconnection is owned by
     /// the background auto-reconnect with exponential backoff.
     ///
+    /// When the relay rejects the event with `auth-required:` and this
+    /// connection can authenticate (NIP-42) — an ``AuthenticationResponder`` is
+    /// installed, an AUTH round-trip is in flight, or one already succeeded —
+    /// the publish waits for the authentication to conclude and retries once.
+    ///
     /// Throws if the relay responds with accepted: false or if no OK is received within the publish ack timeout.
     public func publish(_ event: Event) async throws {
         guard state == .connected else {
@@ -286,7 +353,77 @@ public actor RelayConnection {
         do {
             try await sendAndAwaitOK(.event(event), eventId: event.id)
         } catch let rejection as EventRejection {
-            throw NostrError.relayError("Relay rejected event \(rejection.eventId): \(rejection.message)")
+            try await retryPublishAfterAuthentication(event, rejection: rejection)
+        }
+    }
+
+    /// Handles a publish rejection, retrying once after authentication for an
+    /// `auth-required:` rejection that authentication can plausibly cure
+    /// (NIP-42). Relays send the AUTH challenge right before or after such a
+    /// rejection, so waiting for the (typically automatic) AUTH round-trip and
+    /// resending delivers the event without the caller doing anything.
+    ///
+    /// Any other rejection — including a second one from the retry — surfaces
+    /// as ``NostrError/relayError(_:)`` exactly as before.
+    private func retryPublishAfterAuthentication(_ event: Event, rejection: EventRejection) async throws {
+        guard RelayResponsePrefix(message: rejection.message) == .authRequired,
+            canExpectAuthentication
+        else {
+            throw Self.rejectionError(rejection)
+        }
+
+        do {
+            try await waitForAuthentication()
+        } catch NostrError.timeout {
+            // Authentication never concluded, so the original rejection stands.
+            throw Self.rejectionError(rejection)
+        }
+
+        do {
+            try await sendAndAwaitOK(.event(event), eventId: event.id)
+        } catch let rejection as EventRejection {
+            throw Self.rejectionError(rejection)
+        }
+    }
+
+    /// The public error for an OK `false`, shared by every publish path so the
+    /// message format stays identical with and without the NIP-42 retry.
+    private static func rejectionError(_ rejection: EventRejection) -> NostrError {
+        NostrError.relayError("Relay rejected event \(rejection.eventId): \(rejection.message)")
+    }
+
+    /// Suspends until an AUTH round-trip on this connection succeeds, bounded
+    /// by ``RelayConnectionConfig/publishAckTimeout``. Returns immediately when
+    /// already authenticated.
+    ///
+    /// - Throws: ``NostrError/authenticationFailed(_:)`` when the relay rejects
+    ///   the AUTH event, ``NostrError/timeout`` when no round-trip concludes in
+    ///   time, ``NostrError/notConnected`` when the session is torn down.
+    private func waitForAuthentication() async throws {
+        if isAuthenticated { return }
+
+        let token = UUID()
+        let (stream, continuation) = AsyncThrowingStream<Void, Error>.makeStream()
+        authenticationWaiters[token] = continuation
+
+        defer {
+            authenticationWaiters.removeValue(forKey: token)?.finish()
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for try await _ in stream {
+                    return
+                }
+            }
+
+            group.addTask {
+                try await Task.sleep(for: .seconds(self.config.publishAckTimeout))
+                throw NostrError.timeout
+            }
+
+            try await group.next()
+            group.cancelAll()
         }
     }
 
@@ -529,12 +666,9 @@ public actor RelayConnection {
                             switch relayMessage {
                             case .ok(let eventId, let accepted, let message):
                                 // Settle a pending NIP-42 authentication for this event id.
-                                // Removed on both outcomes; only an accepted AUTH marks the
-                                // pubkey as authenticated.
-                                if let pubkey = pendingAuthentications.removeValue(forKey: eventId),
-                                    accepted
-                                {
-                                    authenticatedPubkeys.insert(pubkey)
+                                if let pubkey = pendingAuthentications.removeValue(forKey: eventId) {
+                                    settleAuthentication(
+                                        pubkey: pubkey, accepted: accepted, message: message)
                                 }
                                 for waiter in removeAllPublishWaiters(eventId: eventId) {
                                     if accepted {
@@ -548,6 +682,14 @@ public actor RelayConnection {
                                 authenticationChallenge = challenge
                                 if let responder = authenticationResponder {
                                     respondToChallenge(challenge, with: responder)
+                                }
+                            case .closed(let subscriptionId, let message):
+                                // A subscription the relay closed pending authentication is
+                                // re-requested once an AUTH round-trip succeeds (NIP-42).
+                                if RelayResponsePrefix(message: message) == .authRequired,
+                                    subscriptions[subscriptionId] != nil
+                                {
+                                    subscriptionsAwaitingAuthentication.insert(subscriptionId)
                                 }
                             default:
                                 break
