@@ -349,7 +349,10 @@ public actor RelayConnection {
     /// installed, an AUTH round-trip is in flight, or one already succeeded —
     /// the publish waits for the authentication to conclude and retries once.
     ///
-    /// Throws if the relay responds with accepted: false or if no OK is received within the publish ack timeout.
+    /// Throws if the relay responds with accepted: false or if no OK is received within the
+    /// publish ack timeout. When the NIP-42 retry path is active and the relay rejects the
+    /// AUTH event itself, the publish throws ``NostrError/authenticationFailed(_:)`` — the
+    /// root cause — instead of the auth-required rejection.
     public func publish(_ event: Event) async throws {
         guard state == .connected else {
             throw NostrError.notConnected
@@ -400,6 +403,10 @@ public actor RelayConnection {
     /// Suspends until an AUTH round-trip on this connection succeeds, bounded
     /// by ``RelayConnectionConfig/publishAckTimeout``. Returns immediately when
     /// already authenticated.
+    ///
+    /// This is the middle leg of the auth-retry publish path, which makes a
+    /// publish take up to 3× the ack timeout end to end: the rejected attempt,
+    /// this wait, and the retried attempt each get the full bound.
     ///
     /// - Throws: ``NostrError/authenticationFailed(_:)`` when the relay rejects
     ///   the AUTH event, ``NostrError/timeout`` when no round-trip concludes in
