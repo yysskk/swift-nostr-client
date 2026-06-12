@@ -71,8 +71,10 @@ public actor RelayConnection {
     public private(set) var authenticatedPubkeys: Set<String> = []
 
     /// Pubkeys of in-flight AUTH events keyed by event id, so the receive loop
-    /// can record them as authenticated when the relay's OK arrives — even if
-    /// the ``authenticate(with:)`` caller has been cancelled by then.
+    /// can mark them authenticated the moment the relay's OK arrives. An entry
+    /// lives only as long as its ``authenticate(with:)`` call: a failed or
+    /// cancelled call removes it, so a late OK after a reported failure cannot
+    /// silently flip the connection to authenticated.
     private var pendingAuthentications: [String: String] = [:]
 
     /// Whether at least one pubkey is authenticated on this connection (NIP-42).
@@ -305,15 +307,19 @@ public actor RelayConnection {
         }
 
         // Recorded before sending so the receive loop can mark the pubkey as
-        // authenticated when the OK arrives, even if this caller is cancelled
-        // or timed out by then. Entries the relay never answers are dropped
-        // with the rest of the session state on the next teardown or connect.
+        // authenticated the moment the OK arrives while this call is in flight.
         pendingAuthentications[event.id] = event.pubkey
 
         do {
             try await sendAndAwaitOK(.auth(event), eventId: event.id)
         } catch let rejection as EventRejection {
             throw NostrError.authenticationFailed(rejection.message)
+        } catch {
+            // Once a failure (timeout, send error, cancellation) is reported to
+            // the caller, a late OK must not silently flip the connection to
+            // authenticated — drop the pending entry along with the error.
+            pendingAuthentications.removeValue(forKey: event.id)
+            throw error
         }
     }
 

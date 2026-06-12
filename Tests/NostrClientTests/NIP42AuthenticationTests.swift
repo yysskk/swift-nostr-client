@@ -56,14 +56,19 @@ struct NIP42RelayConnectionTests {
 
     private let relayURL = URL(string: "wss://relay.example.com")!
 
-    private func makeConnection() -> (RelayConnection, MockWebSocketSession) {
+    private func makeConnection(publishAckTimeout: TimeInterval = 30) -> (RelayConnection, MockWebSocketSession) {
         let mock = MockWebSocketSession()
         let connection = RelayConnection(
             url: relayURL,
             webSocketFactory: MockWebSocketSessionFactory(makeSession: { mock }),
             // No auto-reconnect and a long ping interval keep the test's background
             // tasks inert; the connection is torn down explicitly at the end.
-            config: RelayConnectionConfig(connectionTimeout: 1, pingInterval: 60, autoReconnect: false)
+            config: RelayConnectionConfig(
+                connectionTimeout: 1,
+                publishAckTimeout: publishAckTimeout,
+                pingInterval: 60,
+                autoReconnect: false
+            )
         )
         return (connection, mock)
     }
@@ -254,6 +259,26 @@ struct NIP42RelayConnectionTests {
         }
 
         #expect(await connection.authenticatedPubkeys == [alice.publicKey, bob.publicKey])
+        await connection.disconnect()
+    }
+
+    @Test("a late OK after a timed-out authenticate does not authenticate")
+    func lateOKAfterTimeoutDoesNotAuthenticate() async throws {
+        let (connection, mock) = makeConnection(publishAckTimeout: 0.05)
+        try await connection.connect()
+
+        let signer = EventSigner(keyPair: try KeyPair())
+        let event = try signedAuthEvent(signer: signer)
+
+        await #expect(throws: NostrError.timeout) {
+            try await connection.authenticate(with: event)
+        }
+
+        // The relay answers only after the caller already saw the failure.
+        mock.deliver(.string("[\"OK\",\"\(event.id)\",true,\"\"]"))
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(await connection.isAuthenticated == false)
         await connection.disconnect()
     }
 
