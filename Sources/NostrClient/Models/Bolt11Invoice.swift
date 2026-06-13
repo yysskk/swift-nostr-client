@@ -87,7 +87,9 @@ public struct Bolt11Invoice: Sendable, Hashable {
                     description = String(data: Data(Bech32.wordsToBytes(Array(field))), encoding: .utf8)
                 }
             case FieldType.expiry:
-                if expirySeconds == nil {
+                // Cap at 12 words (60 bits) so an oversized field can't fold into a truncated,
+                // garbage value; a real expiry is only a few words.
+                if expirySeconds == nil, field.count <= 12 {
                     expirySeconds = Int64(exactly: Self.integer(from: field))
                 }
             default:
