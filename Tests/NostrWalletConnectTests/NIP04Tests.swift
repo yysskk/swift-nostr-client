@@ -106,4 +106,16 @@ struct NIP04Tests {
             try NIP04.decrypt("not base64!?iv=also bad!", privateKey: bob.privateKey, peerPubkeyXOnly: alice.publicKey)
         }
     }
+
+    @Test("rejects a base64 IV of the wrong length as malformed content")
+    func rejectsWrongLengthIV() throws {
+        let alice = try KeyPair()
+        let bob = try KeyPair()
+        // A valid-base64 ciphertext block paired with a base64 IV that decodes to 8 bytes, not 16.
+        let content = "zJxfaJ32rN5Dg1ODjOlEew==?iv=AAAAAAAAAAA="
+
+        #expect(throws: NIP04.DecodingError.malformedContent) {
+            try NIP04.decrypt(content, privateKey: bob.privateKey, peerPubkeyXOnly: alice.publicKey)
+        }
+    }
 }

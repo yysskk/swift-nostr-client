@@ -60,6 +60,11 @@ enum NIP04 {
         else {
             throw DecodingError.invalidBase64
         }
+        // The IV is part of the wire format, so a wrong length is malformed content — surface it as
+        // a DecodingError rather than letting AES._CBC.IV throw a raw crypto error.
+        guard ivData.count == 16 else {
+            throw DecodingError.malformedContent
+        }
 
         let key = try sharedKey(privateKey: privateKey, peerPubkeyXOnly: peerPubkeyXOnly)
         let iv = try AES._CBC.IV(ivBytes: ivData)
