@@ -9,7 +9,7 @@ A modern Swift library for the Nostr protocol, built with Swift 6 concurrency su
 - **NIP-03 OpenTimestamps**: Attach OTS attestations to events
 - **NIP-05 Verification**: DNS-based identifier verification
 - **NIP-06 Key Derivation**: Generate keys from BIP-39 mnemonic seed phrases
-- **NIP-17 Private DMs**: End-to-end encrypted direct messages with sender anonymity
+- **NIP-17 Private DMs**: End-to-end encrypted direct messages with sender anonymity and kind 10050 DM relay routing
 - **NIP-42 Authentication**: Relay AUTH challenges answered automatically, with auth-required retry
 - **Cryptographic Operations**: Schnorr signatures with secp256k1
 - **NIP-19 Entities**: bech32 encoding/decoding of npub, nsec, note, nprofile, nevent, and naddr
@@ -166,13 +166,24 @@ print("Name: \(metadata?.name ?? "Unknown")")
 ### Private Direct Messages (NIP-17)
 
 ```swift
-// Send (encrypted, gift-wrapped, with a self-copy for sent history)
-try await client.sendDirectMessage("Hello privately!", to: "recipientPubkeyHex")
+// Advertise where you receive DMs (kind 10050). Keep it short — NIP-17 suggests 1–3 relays.
+try await client.publishDirectMessageRelayList(relays: ["wss://inbox.example.com"])
 
-// Receive, already decrypted and parsed
+// Connect your own inbox relays, then receive — already decrypted and parsed
+try await client.connectDirectMessageInboxRelays()
 for await message in try await client.directMessages() {
     print("\(message.senderPubkey): \(message.content)")
 }
+
+// Send (encrypted, gift-wrapped, with a self-copy for sent history). Each gift wrap is routed
+// to its addressee's advertised DM relays — the recipient copy to the recipient's, your
+// self-copy to your own — discovered from each user's kind 10050, falling back to the relay
+// pool when a user has published no DM relay list.
+try await client.sendDirectMessage("Hello privately!", to: "recipientPubkeyHex")
+
+// Look up where another user receives DMs (cached for routing)
+let dmRelays = try await client.fetchDirectMessageRelayList(for: "recipientPubkeyHex")
+print("Receives DMs on: \(dmRelays?.relays ?? [])")
 ```
 
 ### Relay Information (NIP-11)
@@ -282,6 +293,8 @@ Event.Kind.privateDirectMessage // 14 (NIP-17)
 Event.Kind.giftWrap             // 1059 (NIP-59)
 Event.Kind.zapRequest           // 9734
 Event.Kind.zap                  // 9735
+Event.Kind.relayListMetadata        // 10002 (NIP-65)
+Event.Kind.directMessageRelayList   // 10050 (NIP-17)
 
 // Kinds are open-ended: any integer works
 let custom = Event.Kind(rawValue: 30311)
@@ -351,7 +364,7 @@ let isValid = try signed.verify()
 - [x] NIP-09: Event deletion
 - [x] NIP-10: Reply threading (root/reply markers)
 - [x] NIP-11: Relay information document
-- [x] NIP-17: Private direct messages
+- [x] NIP-17: Private direct messages (with kind 10050 DM relay lists)
 - [x] NIP-18: Reposts
 - [x] NIP-19: bech32-encoded entities (npub, nsec, note, nprofile, nevent, naddr)
 - [x] NIP-20: Command Results (OK)

@@ -53,4 +53,36 @@ extension NostrClient {
     ) async throws -> PublishedEvent {
         try await publishDirectMessageRelayList(DirectMessageRelayList(relays: relays), strategy: strategy)
     }
+
+    /// Ensures the current user's own NIP-17 DM inbox relays (kind 10050) are present and connected
+    /// in the pool, so gift-wrapped messages addressed there are received. Fetches the user's DM
+    /// relay list first if it is not already cached.
+    ///
+    /// Call this before subscribing with ``directMessages(limit:)`` or
+    /// ``subscribeToDirectMessages(limit:)`` so the subscription covers the relays you advertised.
+    /// - Returns: The connected inbox relay URLs (empty if you have advertised no DM relay list).
+    /// - Throws: ``NostrError/signerNotSet`` if no signer is configured.
+    @discardableResult
+    public func connectDirectMessageInboxRelays() async throws -> Set<URL> {
+        guard let publicKey = publicKey else {
+            throw NostrError.signerNotSet
+        }
+        return await connectedDirectMessageInboxRelays(for: publicKey)
+    }
+
+    /// Resolves and connects a pubkey's kind-10050 DM inbox relays, fetching the list first if it
+    /// is not cached and at least one relay is connected to query.
+    ///
+    /// Shared by the send path (routing a recipient's gift wrap) and the receive path
+    /// (``connectDirectMessageInboxRelays()``).
+    /// - Returns: The connected inbox relay URLs (empty if none are known or reachable).
+    func connectedDirectMessageInboxRelays(for pubkey: String) async -> Set<URL> {
+        // Discovery needs at least one connected relay to query; this also avoids a blocking
+        // fetch against a pool that cannot answer.
+        if await dmRelayListStore.cachedList(for: pubkey) == nil, await relayPool.connectedCount() > 0 {
+            _ = try? await fetchDirectMessageRelayList(for: pubkey)
+        }
+        let inboxURLs = await dmRelayListStore.inboxRelayURLs(for: pubkey)
+        return await dmRelayListStore.ensureConnected(inboxURLs)
+    }
 }

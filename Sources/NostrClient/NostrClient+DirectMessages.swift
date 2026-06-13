@@ -9,6 +9,11 @@ extension NostrClient {
     /// multi-device sync). Both gift wraps are published in parallel; the message
     /// succeeds when the recipient copy is accepted, and a failed self-copy publish
     /// is non-fatal.
+    ///
+    /// Each gift wrap is routed to its addressee's NIP-17 DM relays (kind 10050): the recipient
+    /// copy to the recipient's inbox relays and the self-copy to the sender's own, discovering
+    /// and caching the lists as needed. When an addressee has advertised no DM relay list, that
+    /// copy falls back to the full relay pool rather than being dropped.
     /// - Parameters:
     ///   - content: The message content
     ///   - recipientPubkey: The recipient's public key (hex)
@@ -39,8 +44,16 @@ extension NostrClient {
             replyTo: replyTo
         )
 
-        async let selfCopyDelivery = publishBestEffort(result.selfGiftWrap)
-        let recipientResult = try await relayPool.publish(result.recipientGiftWrap, strategy: strategy)
+        // NIP-17 routing: deliver each gift wrap to its addressee's kind-10050 DM inbox relays.
+        // A nil target means the addressee advertised no DM relay list (or none could be
+        // connected), so fall back to the full pool rather than dropping the message.
+        let recipientTargets = await directMessageInboxTargets(for: recipientPubkey)
+        let senderTargets = await directMessageInboxTargets(for: keyPair.publicKeyHex)
+
+        async let selfCopyDelivery = publishBestEffort(result.selfGiftWrap, to: senderTargets)
+        let recipientResult = try await relayPool.publish(
+            result.recipientGiftWrap, to: recipientTargets, strategy: strategy
+        )
         let selfCopyResult = await selfCopyDelivery
 
         return SendDirectMessageResult(
@@ -55,9 +68,19 @@ extension NostrClient {
     /// Publishes an event, swallowing failures (used for non-fatal NIP-17 self-copies).
     /// Always uses the pool's default strategy so a caller-supplied strategy
     /// never makes the best-effort publish block the primary send.
+    /// - Parameter relayURLs: The relays to target, or nil to broadcast to the full pool.
     /// - Returns: The per-relay outcome, or nil if the publish failed outright.
-    private func publishBestEffort(_ event: Event) async -> PublishResult? {
-        try? await relayPool.publish(event)
+    private func publishBestEffort(_ event: Event, to relayURLs: Set<URL>? = nil) async -> PublishResult? {
+        try? await relayPool.publish(event, to: relayURLs)
+    }
+
+    /// Resolves the kind-10050 DM inbox relays to route a gift wrap to for `pubkey`, connecting
+    /// them per the gossip policy.
+    /// - Returns: The connected inbox relays, or nil when the addressee advertised no DM relay
+    ///   list (or none could be connected) — signalling a fall back to the full relay pool.
+    private func directMessageInboxTargets(for pubkey: String) async -> Set<URL>? {
+        let connected = await connectedDirectMessageInboxRelays(for: pubkey)
+        return connected.isEmpty ? nil : connected
     }
 
     /// Parses a received gift-wrapped direct message
