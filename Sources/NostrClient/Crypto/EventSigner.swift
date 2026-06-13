@@ -188,6 +188,26 @@ public struct EventSigner: Sendable {
         }
         return try signRelayListMetadata(RelayListMetadata(entries: entries))
     }
+
+    /// Creates and signs a DM relay list event (kind 10050, NIP-17).
+    ///
+    /// The event advertises the relays on which the signer wants to receive
+    /// private direct messages. Its content is empty; the relays are carried as
+    /// `relay` tags.
+    public func signDirectMessageRelayList(_ relayList: DirectMessageRelayList) throws -> Event {
+        let unsigned = UnsignedEvent(
+            pubkey: publicKey,
+            kind: .directMessageRelayList,
+            rawTags: relayList.toTags(),
+            content: ""
+        )
+        return try sign(unsigned)
+    }
+
+    /// Creates and signs a DM relay list event from relay URLs (kind 10050, NIP-17).
+    public func signDirectMessageRelayList(relays: [String]) throws -> Event {
+        try signDirectMessageRelayList(DirectMessageRelayList(relays: relays))
+    }
 }
 
 // MARK: - Event Verification
