@@ -81,9 +81,7 @@ extension NostrClient {
         limit: Int? = nil,
         handler: @escaping @Sendable (Event) -> Void
     ) async throws -> String {
-        let routeSet = await resolveOutboxRelays(authors: authors)
-        let filter = Filter(authors: authors, kinds: kinds, limit: limit)
-        return try await openSubscription(filters: [filter], to: routeSet, handler: Self.eventOnly(handler)).id
+        try await openOutboxSubscription(authors: authors, kinds: kinds, limit: limit, handler: Self.eventOnly(handler))
     }
 
     /// Subscribes to events from multiple authors using the NIP-65 outbox model.
@@ -95,9 +93,20 @@ extension NostrClient {
         limit: Int? = nil,
         eventHandler: @escaping @Sendable (SubscriptionEvent) -> Void
     ) async throws -> String {
+        try await openOutboxSubscription(authors: authors, kinds: kinds, limit: limit, handler: eventHandler)
+    }
+
+    /// Shared implementation for the deprecated handler-based outbox overloads: resolves outbox
+    /// routing for the authors and opens a subscription delivering items to `handler`.
+    private func openOutboxSubscription(
+        authors: [String],
+        kinds: [Event.Kind],
+        limit: Int?,
+        handler: @escaping @Sendable (SubscriptionEvent) -> Void
+    ) async throws -> String {
         let routeSet = await resolveOutboxRelays(authors: authors)
         let filter = Filter(authors: authors, kinds: kinds, limit: limit)
-        return try await openSubscription(filters: [filter], to: routeSet, handler: eventHandler).id
+        return try await openSubscription(filters: [filter], to: routeSet, handler: handler).id
     }
 
     /// Resolves the WRITE relays of the given authors for outbox routing.
