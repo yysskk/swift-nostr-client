@@ -14,7 +14,11 @@ let package = Package(
         .library(
             name: "NostrClient",
             targets: ["NostrClient"]
-        )
+        ),
+        .library(
+            name: "NostrWalletConnect",
+            targets: ["NostrWalletConnect"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", from: "0.23.2"),
@@ -29,9 +33,22 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
+        .target(
+            name: "NostrWalletConnect",
+            dependencies: [
+                "NostrClient",
+                .product(name: "P256K", package: "swift-secp256k1"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+            ]
+        ),
         .testTarget(
             name: "NostrClientTests",
             dependencies: ["NostrClient"]
+        ),
+        .testTarget(
+            name: "NostrWalletConnectTests",
+            dependencies: ["NostrWalletConnect"]
         ),
     ]
 )
