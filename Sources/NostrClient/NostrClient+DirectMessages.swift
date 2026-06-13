@@ -47,8 +47,11 @@ extension NostrClient {
         // NIP-17 routing: deliver each gift wrap to its addressee's kind-10050 DM inbox relays.
         // A nil target means the addressee advertised no DM relay list (or none could be
         // connected), so fall back to the full pool rather than dropping the message.
-        let recipientTargets = await directMessageInboxTargets(for: recipientPubkey)
-        let senderTargets = await directMessageInboxTargets(for: keyPair.publicKeyHex)
+        // Resolve both addressees in parallel — each may trigger an independent relay-list fetch.
+        async let recipientTargetsTask = directMessageInboxTargets(for: recipientPubkey)
+        async let senderTargetsTask = directMessageInboxTargets(for: keyPair.publicKeyHex)
+        let recipientTargets = await recipientTargetsTask
+        let senderTargets = await senderTargetsTask
 
         async let selfCopyDelivery = publishBestEffort(result.selfGiftWrap, to: senderTargets)
         let recipientResult = try await relayPool.publish(
