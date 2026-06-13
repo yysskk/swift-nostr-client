@@ -94,6 +94,6 @@ actor RelayListStore {
     }
 
     private func urlSet(_ strings: [String]) -> Set<URL> {
-        Set(strings.compactMap { URL(string: RelayListMetadata.normalize($0)) })
+        Set(strings.compactMap { URL(string: RelayURL.normalize($0)) })
     }
 }

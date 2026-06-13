@@ -211,4 +211,21 @@ extension Filter {
             limit: 1
         )
     }
+
+    /// Create a filter for DM relay lists of specific users (NIP-17, kind 10050)
+    public static func directMessageRelayList(pubkeys: [String]) -> Filter {
+        Filter(
+            authors: pubkeys,
+            kinds: [.directMessageRelayList]
+        )
+    }
+
+    /// Create a filter for a specific user's DM relay list (NIP-17, kind 10050)
+    public static func directMessageRelayList(pubkey: String) -> Filter {
+        Filter(
+            authors: [pubkey],
+            kinds: [.directMessageRelayList],
+            limit: 1
+        )
+    }
 }

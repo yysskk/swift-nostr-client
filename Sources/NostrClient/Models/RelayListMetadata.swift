@@ -42,22 +42,12 @@ public struct RelayListMetadata: Codable, Hashable, Sendable {
             guard let entry = RelayListEntry.fromTag(tag) else {
                 continue
             }
-            let key = Self.normalize(entry.url)
+            let key = RelayURL.normalize(entry.url)
             if seen.insert(key).inserted {
                 result.append(entry)
             }
         }
         self.entries = result
-    }
-
-    /// Normalizes a relay URL into a comparison/routing key: lowercased, with a single trailing slash removed.
-    /// Used only for de-duplication and pool routing — the stored `url` is never mutated, so tags round-trip exactly.
-    static func normalize(_ url: String) -> String {
-        var normalized = url.lowercased()
-        if normalized.hasSuffix("/") {
-            normalized.removeLast()
-        }
-        return normalized
     }
 }
 

@@ -130,6 +130,7 @@ extension Event {
         public static let muteList = Kind(rawValue: 10000)
         public static let pinList = Kind(rawValue: 10001)
         public static let relayListMetadata = Kind(rawValue: 10002)
+        public static let directMessageRelayList = Kind(rawValue: 10050)
         public static let clientAuthentication = Kind(rawValue: 22242)
         public static let nostrConnect = Kind(rawValue: 24133)
         public static let categorizedPeopleList = Kind(rawValue: 30000)
