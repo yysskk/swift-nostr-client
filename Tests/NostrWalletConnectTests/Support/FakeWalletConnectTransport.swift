@@ -32,6 +32,8 @@ actor FakeWalletConnectTransport: WalletConnectTransport {
     }
 
     func events() -> AsyncStream<Event> {
+        // Finish any previous stream so an earlier consumer isn't left hanging.
+        continuation?.finish()
         let (stream, continuation) = AsyncStream<Event>.makeStream()
         self.continuation = continuation
         return stream

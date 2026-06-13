@@ -66,4 +66,15 @@ struct WalletConnectTransportTests {
         let next = await iterator.next()
         #expect(next == nil)
     }
+
+    @Test("a second events() call finishes the previous stream")
+    func secondEventsFinishesFirst() async throws {
+        let transport = FakeWalletConnectTransport()
+        let first = await transport.events()
+        _ = await transport.events()
+
+        var iterator = first.makeAsyncIterator()
+        let next = await iterator.next()
+        #expect(next == nil)
+    }
 }

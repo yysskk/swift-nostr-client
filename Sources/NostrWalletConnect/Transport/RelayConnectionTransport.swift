@@ -16,6 +16,11 @@ public actor RelayConnectionTransport: WalletConnectTransport {
     private let relays: [RelayConnection]
     private var forwardingTasks: [Task<Void, Never>] = []
     private var eventContinuation: AsyncStream<Event>.Continuation?
+    /// Number of relay message streams still feeding the current ``events()`` stream.
+    private var activeRelayStreams = 0
+    /// Incremented each time the event stream is rebuilt or torn down, so completions from a
+    /// previous generation's forwarding tasks are ignored.
+    private var generation = 0
 
     /// Creates a transport for the given relay URLs.
     /// - Parameters:
@@ -62,15 +67,30 @@ public actor RelayConnectionTransport: WalletConnectTransport {
     }
 
     public func events() -> AsyncStream<Event> {
+        // Tear down any previous stream so its consumer isn't left hanging and its tasks don't leak.
+        teardownEventStream()
+
+        generation += 1
+        let generation = generation
         let (stream, continuation) = AsyncStream<Event>.makeStream()
         eventContinuation = continuation
+
+        guard !relays.isEmpty else {
+            continuation.finish()
+            eventContinuation = nil
+            return stream
+        }
+
+        activeRelayStreams = relays.count
         for relay in relays {
-            let task = Task { [continuation] in
+            let task = Task { [continuation, weak self] in
                 for await message in await relay.messages() {
                     if case .event(_, let event) = message {
                         continuation.yield(event)
                     }
                 }
+                // The relay's stream ended (e.g. a dropped connection); finish once they all have.
+                await self?.relayStreamEnded(generation: generation)
             }
             forwardingTasks.append(task)
         }
@@ -78,14 +98,31 @@ public actor RelayConnectionTransport: WalletConnectTransport {
     }
 
     public func disconnect() async {
+        teardownEventStream()
+        for relay in relays {
+            await relay.disconnect()
+        }
+    }
+
+    /// Cancels the forwarding tasks and finishes the current event stream, invalidating the
+    /// generation so any in-flight task completions are ignored.
+    private func teardownEventStream() {
+        generation += 1
         for task in forwardingTasks {
             task.cancel()
         }
         forwardingTasks.removeAll()
+        activeRelayStreams = 0
         eventContinuation?.finish()
         eventContinuation = nil
-        for relay in relays {
-            await relay.disconnect()
-        }
+    }
+
+    /// Records that one relay's message stream ended, finishing the event stream once they all have.
+    private func relayStreamEnded(generation: Int) {
+        guard generation == self.generation else { return }
+        activeRelayStreams -= 1
+        guard activeRelayStreams <= 0 else { return }
+        eventContinuation?.finish()
+        eventContinuation = nil
     }
 }
