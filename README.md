@@ -12,7 +12,7 @@ A modern Swift library for the Nostr protocol, built with Swift 6 concurrency su
 - **NIP-17 Private DMs**: End-to-end encrypted direct messages with sender anonymity, kind 10050 DM relay routing, reactions, and encrypted file messages
 - **NIP-40 Expiration**: Disappearing messages via an expiration timestamp, including private DMs
 - **NIP-42 Authentication**: Relay AUTH challenges answered automatically, with auth-required retry
-- **NIP-57 Zaps**: Sign zap requests (kind 9734) and resolve LNURL-pay endpoints for Lightning tips
+- **NIP-57 Zaps**: Full Lightning zap flow — sign zap requests (kind 9734), resolve LNURL-pay endpoints, fetch invoices, decode bolt11, and verify kind-9735 zap receipts
 - **Cryptographic Operations**: Schnorr signatures with secp256k1
 - **NIP-19 Entities**: bech32 encoding/decoding of npub, nsec, note, nprofile, nevent, and naddr
 - **NIP-65 Outbox Model**: Per-user read/write relay lists with gossip routing for subscriptions and publishing
@@ -281,9 +281,9 @@ By default the client adds and connects resolved relays on demand (capped per re
 
 ### Lightning Zaps (NIP-57)
 
-Build the sender side of a zap: sign a zap request and resolve the recipient's LNURL-pay endpoint.
-Fetching the invoice from the callback and paying the returned bolt11 are the caller's
-responsibility.
+The full sender flow: resolve the recipient's LNURL-pay endpoint, sign a zap request, fetch the
+Lightning invoice, and verify the zap receipt once it arrives over relays. Paying the bolt11 invoice
+is the caller's job (use a Lightning wallet).
 
 ```swift
 // 1. Resolve the recipient's LNURL-pay endpoint from their lud16 lightning address
@@ -291,7 +291,7 @@ responsibility.
 guard let serviceURL = LNURL.payServiceURL(forLightningAddress: "alice@example.com") else { return }
 let (data, _) = try await URLSession.shared.data(from: serviceURL)
 let pay = try JSONDecoder().decode(LNURLPayResponse.self, from: data)
-guard pay.supportsZaps else { return }
+guard pay.supportsZaps, let providerPubkey = pay.nostrPubkey else { return }
 
 // 2. Sign a zap request (kind 9734) — note it is NOT published to relays.
 let signer = EventSigner(keyPair: keyPair)
@@ -303,11 +303,17 @@ let zapRequest = try signer.signZapRequest(
     comment: "great post!"
 )
 
-// 3. Request the invoice from the callback, then pay the returned bolt11 with your wallet.
-let invoiceURL = pay.invoiceRequestURL(
-    amountMillisats: 21_000, zapRequest: zapRequest, lnurl: LNURL.encode(serviceURL)
-)
-// let (invoiceData, _) = try await URLSession.shared.data(from: invoiceURL!)  // → {"pr": "<bolt11>"}
+// 3. Fetch the bolt11 invoice from the callback, then pay it with a Lightning wallet.
+let bolt11 = try await pay.fetchInvoice(
+    amountMillisats: 21_000, zapRequest: zapRequest, lnurl: LNURL.encode(serviceURL))
+// …pay `bolt11` with your wallet. You can also decode it on its own:
+let invoice = Bolt11Invoice(bolt11)   // .amountMillisats, .paymentHash, .descriptionHash, .expirySeconds
+
+// 4. When the kind-9735 zap receipt arrives over relays, verify it is authentic.
+if let receipt = ZapReceipt(event: receiptEvent) {
+    try receipt.validate(lnurlProviderPubkey: providerPubkey, expectedAmountMillisats: 21_000)
+    // receipt.recipientPubkey, receipt.amountMillisats, receipt.zappedEventId, …
+}
 ```
 
 ## Models
@@ -435,7 +441,7 @@ let isValid = try signed.verify()
 - [x] NIP-40: Expiration timestamp (disappearing messages)
 - [x] NIP-42: Client authentication (automatic challenge response, auth-required retry)
 - [x] NIP-44: Versioned encryption
-- [ ] NIP-57: Lightning Zaps — _in progress:_ zap request (kind 9734) and LNURL helpers landed; invoice fetch and kind-9735 receipt validation pending
+- [x] NIP-57: Lightning Zaps (zap request kind 9734, LNURL helpers, invoice fetch, bolt11 decoding, kind-9735 receipt validation)
 - [x] NIP-59: Gift wrap
 - [x] NIP-65: Relay list metadata (outbox model)
 
