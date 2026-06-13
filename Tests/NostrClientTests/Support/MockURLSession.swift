@@ -25,7 +25,9 @@ struct MockInvocation<Value> {
 /// `URLRequest` and the closure's return value.
 ///
 /// The session intercepts every request and serves `response`, so tests exercise networking code
-/// (status handling, decoding, cancellation) without making real network calls.
+/// (status handling, decoding, cancellation) without making real network calls. Each call registers
+/// its own handler and routes requests to it via a per-session header, so concurrent calls (Swift
+/// Testing runs tests in parallel) never interfere.
 @discardableResult
 func withMockURLSession<Value>(
     response: MockResponse,
@@ -36,6 +38,10 @@ func withMockURLSession<Value>(
 
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [MockURLProtocol.self]
+    // Tag every request from this session with its handler ID so MockURLProtocol can look up the
+    // right handler without any shared mutable "current handler" pointer that concurrent sessions
+    // would race on.
+    config.httpAdditionalHeaders = [MockURLProtocol.handlerIDHeader: handlerID.uuidString]
     let session = URLSession(configuration: config)
     defer { session.invalidateAndCancel() }
 
@@ -51,14 +57,12 @@ final class MockURLProtocolRegistry: @unchecked Sendable {
     private let lock = NSLock()
     private var handlers: [UUID: MockResponse] = [:]
     private var captured: [UUID: URLRequest] = [:]
-    private var currentID: UUID?
 
     func register(_ response: MockResponse) -> UUID {
         lock.lock()
         defer { lock.unlock() }
         let id = UUID()
         handlers[id] = response
-        currentID = id
         return id
     }
 
@@ -67,14 +71,12 @@ final class MockURLProtocolRegistry: @unchecked Sendable {
         defer { lock.unlock() }
         handlers.removeValue(forKey: id)
         captured.removeValue(forKey: id)
-        if currentID == id { currentID = nil }
     }
 
-    func currentHandler() -> (UUID, MockResponse)? {
+    func handler(for id: UUID) -> MockResponse? {
         lock.lock()
         defer { lock.unlock() }
-        guard let id = currentID, let handler = handlers[id] else { return nil }
-        return (id, handler)
+        return handlers[id]
     }
 
     func recordRequest(_ request: URLRequest, for id: UUID) {
@@ -91,8 +93,12 @@ final class MockURLProtocolRegistry: @unchecked Sendable {
 }
 
 /// A `URLProtocol` that serves the response registered by ``withMockURLSession(response:body:)`` and
-/// records the request it received.
+/// records the request it received. The handler to use is identified by the ``handlerIDHeader`` that
+/// `withMockURLSession` stamps on every request, keeping concurrent sessions fully isolated.
 final class MockURLProtocol: URLProtocol {
+    /// The request header carrying the registered handler's ID.
+    static let handlerIDHeader = "X-Mock-Handler-ID"
+
     static func register(response: MockResponse) -> UUID {
         MockURLProtocolRegistry.shared.register(response)
     }
@@ -109,7 +115,10 @@ final class MockURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        guard let (id, response) = MockURLProtocolRegistry.shared.currentHandler() else {
+        guard let idString = request.value(forHTTPHeaderField: Self.handlerIDHeader),
+            let id = UUID(uuidString: idString),
+            let response = MockURLProtocolRegistry.shared.handler(for: id)
+        else {
             client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable))
             return
         }
