@@ -197,7 +197,9 @@ extension LNURLPayResponse {
         lnurl: String? = nil,
         urlSession: URLSession = .shared
     ) async throws -> String {
-        guard (minSendable...maxSendable).contains(amountMillisats) else {
+        // Explicit comparisons rather than `(minSendable...maxSendable).contains(_:)` — a malformed
+        // response with minSendable > maxSendable would trap when constructing the range.
+        guard amountMillisats >= minSendable, amountMillisats <= maxSendable else {
             throw InvoiceError.amountOutOfRange(min: minSendable, max: maxSendable)
         }
         guard
@@ -215,7 +217,9 @@ extension LNURLPayResponse {
         do {
             (data, urlResponse) = try await urlSession.data(for: request)
         } catch {
-            if error is CancellationError || Task.isCancelled {
+            // Surface cancellation as CancellationError; wrap everything else so no raw error leaks
+            // past the typed InvoiceError. URLSession reports task cancellation as URLError(.cancelled).
+            if error is CancellationError {
                 throw error
             }
             if let urlError = error as? URLError, urlError.code == .cancelled {

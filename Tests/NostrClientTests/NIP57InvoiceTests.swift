@@ -71,6 +71,19 @@ struct NIP57InvoiceTests {
         }
     }
 
+    @Test("fetchInvoice throws (not traps) when the endpoint advertises an inverted range")
+    func fetchInvoiceInvertedRange() async throws {
+        // A malformed response with minSendable > maxSendable must not trap on a range literal.
+        let pay = makePayResponse(min: 100_000, max: 1000)
+        let zap = try makeZapRequest()
+
+        await #expect(throws: LNURLPayResponse.InvoiceError.amountOutOfRange(min: 100_000, max: 1000)) {
+            _ = try await withMockURLSession(response: .failure(URLError(.cannotConnectToHost))) { session in
+                try await pay.fetchInvoice(amountMillisats: 50_000, zapRequest: zap, urlSession: session)
+            }
+        }
+    }
+
     // MARK: - Endpoint and response errors
 
     @Test("fetchInvoice surfaces an LNURL error body as lnurlError")
