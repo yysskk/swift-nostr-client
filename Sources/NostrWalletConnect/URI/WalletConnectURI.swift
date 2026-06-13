@@ -1,5 +1,6 @@
 import Foundation
-import NostrClient
+
+public import NostrClient
 
 /// A parsed NIP-47 `nostr+walletconnect://` connection string.
 ///
@@ -31,6 +32,11 @@ public struct WalletConnectURI: Sendable, Hashable {
     /// An optional lightning address (lud16) the wallet advertised.
     public let lud16: String?
 
+    /// The client identity derived from ``secret`` at initialization. Cached so signing and
+    /// encryption never repeat the EC point multiplication. It is fully determined by ``secret``,
+    /// so it is excluded from `Equatable`/`Hashable`.
+    private let cachedClientKeyPair: KeyPair
+
     /// The URI scheme, without the `://` separator.
     public static let scheme = "nostr+walletconnect"
 
@@ -53,8 +59,9 @@ public struct WalletConnectURI: Sendable, Hashable {
         guard secret.count == 32 else {
             throw WalletConnectError.invalidURI(reason: "secret must be 32 bytes")
         }
-        // Reject a secret that is not a usable secp256k1 private key now, rather than at first use.
-        guard (try? KeyPair(privateKey: secret)) != nil else {
+        // Reject a secret that is not a usable secp256k1 private key now, rather than at first use,
+        // and cache the derived identity so later signing/encryption reuses it.
+        guard let clientKeyPair = try? KeyPair(privateKey: secret) else {
             throw WalletConnectError.invalidURI(reason: "secret is not a valid private key")
         }
 
@@ -62,6 +69,7 @@ public struct WalletConnectURI: Sendable, Hashable {
         self.relays = relays
         self.secret = secret
         self.lud16 = lud16
+        self.cachedClientKeyPair = clientKeyPair
     }
 
     /// Parses a `nostr+walletconnect://` connection string.
@@ -112,23 +120,44 @@ public struct WalletConnectURI: Sendable, Hashable {
         }
         components.queryItems = items
 
-        return components.string ?? ""
+        // Unreachable for a validated URI (constant scheme, hex host, URL relays); fail loud rather
+        // than emit a silently broken connection string if that invariant is ever violated.
+        guard let string = components.string else {
+            fatalError("URLComponents failed to serialize a validated NWC URI")
+        }
+        return string
     }
 
     /// The client identity derived from ``secret`` — used to sign requests and encrypt payloads.
-    public func clientKeyPair() throws -> KeyPair {
-        try KeyPair(privateKey: secret)
+    public func clientKeyPair() -> KeyPair {
+        cachedClientKeyPair
     }
 
     /// A signer for the client identity. Convenience over ``clientKeyPair()``.
-    public func clientSigner() throws -> EventSigner {
-        EventSigner(keyPair: try clientKeyPair())
+    public func clientSigner() -> EventSigner {
+        EventSigner(keyPair: cachedClientKeyPair)
     }
 
     /// The client's public key (hex), derived from ``secret``.
     public var clientPublicKeyHex: String {
-        get throws {
-            try clientKeyPair().publicKeyHex
-        }
+        cachedClientKeyPair.publicKeyHex
+    }
+}
+
+// MARK: - Equatable & Hashable
+
+extension WalletConnectURI {
+    public static func == (lhs: WalletConnectURI, rhs: WalletConnectURI) -> Bool {
+        lhs.walletPubkey == rhs.walletPubkey
+            && lhs.relays == rhs.relays
+            && lhs.secret == rhs.secret
+            && lhs.lud16 == rhs.lud16
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(walletPubkey)
+        hasher.combine(relays)
+        hasher.combine(secret)
+        hasher.combine(lud16)
     }
 }
