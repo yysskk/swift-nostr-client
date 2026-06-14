@@ -54,6 +54,45 @@ struct ZapPaymentTests {
         #expect(zap.feesPaid == 3)
     }
 
+    @Test("payZap propagates a wallet payment error after fetching the invoice")
+    func payZapPropagatesWalletError() async throws {
+        let wallet = try KeyPair()
+        let client = try KeyPair()
+        let zapSigner = EventSigner(keyPair: try KeyPair())
+        let transport = FakeWalletConnectTransport()
+        let connection = WalletConnection(
+            uri: try NWCFixtures.uri(wallet: wallet, client: client),
+            transport: transport,
+            config: .init(requestTimeout: 2, preferredEncryption: .nip44))
+
+        MockURLProtocol.statusCode = 200
+        MockURLProtocol.responseBody = Data(#"{"pr":"lnbc210n1pzapinvoice"}"#.utf8)
+        let zapRequest = try zapSigner.signZapRequest(
+            recipientPubkey: String(repeating: "1", count: 64), relays: ["wss://relay.example"],
+            amountMillisats: 21000)
+
+        async let result = connection.payZap(
+            lnurlPay: payResponse(),
+            amountMillisats: 21000,
+            zapRequest: zapRequest,
+            urlSession: MockURLProtocol.makeSession())
+
+        let request = try await NWCFixtures.waitForSentEvents(transport, count: 1)[0]
+        await transport.emit(
+            try NWCFixtures.response(
+                resultJSON:
+                    #"{"result_type":"pay_invoice","error":{"code":"PAYMENT_FAILED","message":"route not found"}}"#,
+                requestID: request.id, client: client, wallet: wallet))
+
+        do {
+            _ = try await result
+            Issue.record("expected a wallet error")
+        } catch let WalletConnectError.walletError(code, message) {
+            #expect(code == .paymentFailed)
+            #expect(message == "route not found")
+        }
+    }
+
     @Test("payZap rejects an out-of-range amount before sending any wallet request")
     func payZapRejectsOutOfRange() async throws {
         let wallet = try KeyPair()

@@ -25,12 +25,11 @@ final class MockURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        if let url = request.url,
+        guard let url = request.url,
             let response = HTTPURLResponse(
                 url: url, statusCode: Self.statusCode, httpVersion: nil, headerFields: nil)
-        {
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        }
+        else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Self.responseBody)
         client?.urlProtocolDidFinishLoading(self)
     }
