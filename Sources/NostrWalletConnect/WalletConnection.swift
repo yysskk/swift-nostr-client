@@ -138,7 +138,14 @@ public actor WalletConnection {
         pendingInfo = continuation
 
         try await transport.subscribe(id: Self.infoSubscriptionID, filters: [infoFilter])
-        defer { Task { [transport] in await transport.unsubscribe(id: Self.infoSubscriptionID) } }
+        defer {
+            Task { [weak self, transport] in
+                // If a concurrent fetchInfo() superseded this one and is still waiting, it owns the
+                // subscription — don't close it out from under the survivor.
+                if await self?.isFetchingInfo == true { return }
+                await transport.unsubscribe(id: Self.infoSubscriptionID)
+            }
+        }
 
         let timeout = config.requestTimeout
         let timeoutTask = Task { [weak self] in
@@ -156,6 +163,11 @@ public actor WalletConnection {
     private func failPendingInfo() {
         pendingInfo?.finish(throwing: WalletConnectError.timedOut)
         pendingInfo = nil
+    }
+
+    /// Whether a ``fetchInfo()`` call is currently waiting on the info subscription.
+    private var isFetchingInfo: Bool {
+        pendingInfo != nil
     }
 
     // MARK: - Notifications
@@ -200,7 +212,7 @@ public actor WalletConnection {
 
         let (stream, continuation) = AsyncThrowingStream<[ResponsePart], Error>.makeStream()
         pending[requestID] = PendingRequest(
-            scheme: scheme, collected: [], expected: expectedResponses, continuation: continuation)
+            scheme: scheme, collected: [], receivedCount: 0, expected: expectedResponses, continuation: continuation)
 
         let timeout = config.requestTimeout
         let timeoutTask = Task { [weak self] in
@@ -308,23 +320,22 @@ public actor WalletConnection {
 
     private func handleResponse(_ event: Event) {
         guard let requestID = event.firstTagValue(named: "e"), var request = pending[requestID] else { return }
+        request.receivedCount += 1
 
-        guard
-            let content = try? WalletConnectCipher(request.scheme).decrypt(
-                event.content, senderPubkey: walletPubkey, recipient: keyPair)
-        else {
-            // For a multi-response request, skip this undecryptable response and keep the ones
-            // already collected; for a single-response request there is nothing to preserve, so
-            // fail fast.
-            if request.expected == 1 {
-                pending.removeValue(forKey: requestID)
-                request.continuation.finish(throwing: WalletConnectError.responseDecodingFailed)
-            }
+        if let content = try? WalletConnectCipher(request.scheme).decrypt(
+            event.content, senderPubkey: walletPubkey, recipient: keyPair)
+        {
+            request.collected.append(ResponsePart(dTag: event.firstTagValue(named: "d"), content: content))
+        } else if request.expected == 1 {
+            // Nothing to preserve for a single-response request, so fail fast.
+            pending.removeValue(forKey: requestID)
+            request.continuation.finish(throwing: WalletConnectError.responseDecodingFailed)
             return
         }
 
-        request.collected.append(ResponsePart(dTag: event.firstTagValue(named: "d"), content: content))
-        if request.collected.count >= request.expected {
+        // Count undecryptable responses toward completion so a multi-response request finishes as
+        // soon as every response has arrived, rather than waiting out the timeout.
+        if request.receivedCount >= request.expected {
             pending.removeValue(forKey: requestID)
             request.continuation.yield(request.collected)
             request.continuation.finish()
@@ -377,7 +388,10 @@ struct ResponsePart: Sendable {
 /// State for an in-flight request awaiting one or more responses.
 private struct PendingRequest {
     let scheme: WalletConnectEncryption
+    /// The successfully decrypted response parts.
     var collected: [ResponsePart]
+    /// Total responses seen (including undecryptable ones), used for the completion check.
+    var receivedCount: Int
     let expected: Int
     let continuation: AsyncThrowingStream<[ResponsePart], Error>.Continuation
 }

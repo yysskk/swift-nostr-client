@@ -160,4 +160,37 @@ struct WalletConnectionRoundTripTests {
         #expect(try mapped["a"]?.get().preimage == "pa")
         #expect(mapped["b"] == nil)
     }
+
+    @Test("multi_pay_invoice completes promptly when a response cannot be decrypted")
+    func multiPayUndecryptableCompletesPromptly() async throws {
+        let (connection, transport, client, wallet) = try makeConnection(timeout: 5)
+
+        async let results = connection.multiPayInvoice([
+            .init(id: "a", invoice: "lnbc1"),
+            .init(id: "b", invoice: "lnbc2"),
+        ])
+
+        let request = try await NWCFixtures.waitForSentEvents(transport, count: 1)[0]
+        await transport.emit(
+            try NWCFixtures.response(
+                resultJSON: #"{"result_type":"multi_pay_invoice","result":{"preimage":"pa"}}"#,
+                requestID: request.id, client: client, wallet: wallet, dTag: "a"))
+        // A second response that cannot be decrypted must still count toward completion.
+        await transport.emit(
+            Event(
+                id: "resp-garbage", pubkey: wallet.publicKeyHex, createdAt: 0,
+                kind: .walletConnectResponse,
+                tags: [["e", request.id], ["p", client.publicKeyHex], ["d", "b"]],
+                content: "not-decryptable", sig: ""))
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        let mapped = try await results
+        let elapsed = clock.now - start
+
+        #expect(mapped.count == 1)
+        #expect(try mapped["a"]?.get().preimage == "pa")
+        // Far below the 5s timeout: completion fired once both responses arrived.
+        #expect(elapsed < .seconds(1))
+    }
 }
