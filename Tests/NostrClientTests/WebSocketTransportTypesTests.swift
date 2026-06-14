@@ -1,8 +1,8 @@
 import Foundation
-import Testing
 
 // Non-@testable import: also asserts these transport types are part of the public API.
 import NostrClient
+import Testing
 
 /// Locks in the public contract of the transport value types that a host transport
 /// (e.g. an OkHttp-backed factory on Android) maps to and from.
