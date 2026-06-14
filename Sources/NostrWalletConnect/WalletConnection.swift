@@ -102,15 +102,22 @@ public actor WalletConnection {
 
     private func ensureStarted() async throws {
         guard !isStarted else { return }
-        try await transport.connect()
-        try await transport.subscribe(id: Self.responseSubscriptionID, filters: [responseFilter])
-        let events = await transport.events()
-        readerTask = Task { [weak self] in
-            for await event in events {
-                await self?.handle(event)
-            }
-        }
+        // Set before the first await so a concurrent caller can't race through this setup a second
+        // time (actor reentrancy). Reset on failure so a later attempt can retry.
         isStarted = true
+        do {
+            try await transport.connect()
+            try await transport.subscribe(id: Self.responseSubscriptionID, filters: [responseFilter])
+            let events = await transport.events()
+            readerTask = Task { [weak self] in
+                for await event in events {
+                    await self?.handle(event)
+                }
+            }
+        } catch {
+            isStarted = false
+            throw error
+        }
     }
 
     // MARK: - Info
@@ -126,7 +133,8 @@ public actor WalletConnection {
         // Register the waiter before subscribing so an info event delivered during the subscribe
         // round-trip is buffered into this stream rather than dropped.
         let (stream, continuation) = AsyncThrowingStream<WalletInfo, Error>.makeStream()
-        pendingInfo?.finish(throwing: WalletConnectError.notConnected)
+        // A prior in-flight fetchInfo is superseded by this one (the connection stays active).
+        pendingInfo?.finish(throwing: WalletConnectError.superseded)
         pendingInfo = continuation
 
         try await transport.subscribe(id: Self.infoSubscriptionID, filters: [infoFilter])
@@ -204,11 +212,7 @@ public actor WalletConnection {
             pending.removeValue(forKey: requestID)
         }
 
-        do {
-            try await transport.send(event)
-        } catch {
-            throw error
-        }
+        try await transport.send(event)
 
         for try await parts in stream {
             return parts
@@ -309,8 +313,13 @@ public actor WalletConnection {
             let content = try? WalletConnectCipher(request.scheme).decrypt(
                 event.content, senderPubkey: walletPubkey, recipient: keyPair)
         else {
-            pending.removeValue(forKey: requestID)
-            request.continuation.finish(throwing: WalletConnectError.responseDecodingFailed)
+            // For a multi-response request, skip this undecryptable response and keep the ones
+            // already collected; for a single-response request there is nothing to preserve, so
+            // fail fast.
+            if request.expected == 1 {
+                pending.removeValue(forKey: requestID)
+                request.continuation.finish(throwing: WalletConnectError.responseDecodingFailed)
+            }
             return
         }
 

@@ -82,6 +82,34 @@ struct WalletConnectionRoundTripTests {
         #expect(try await payment.preimage == "aa")
     }
 
+    @Test("concurrent commands start the transport only once")
+    func startsOnce() async throws {
+        let (connection, transport, client, wallet) = try makeConnection()
+
+        async let balance = connection.getBalance()
+        async let payment = connection.payInvoice("lnbc1")
+
+        let requests = try await NWCFixtures.waitForSentEvents(transport, count: 2)
+        #expect(await transport.connectCount == 1)
+
+        for request in requests {
+            let json = try NWCFixtures.decryptRequest(request, client: client, wallet: wallet)
+            if json.contains("get_balance") {
+                await transport.emit(
+                    try NWCFixtures.response(
+                        resultJSON: #"{"result_type":"get_balance","result":{"balance":1}}"#,
+                        requestID: request.id, client: client, wallet: wallet))
+            } else {
+                await transport.emit(
+                    try NWCFixtures.response(
+                        resultJSON: #"{"result_type":"pay_invoice","result":{"preimage":"a"}}"#,
+                        requestID: request.id, client: client, wallet: wallet))
+            }
+        }
+        _ = try await balance
+        _ = try await payment
+    }
+
     @Test("a wallet error response is thrown as a typed error")
     func walletErrorResponse() async throws {
         let (connection, transport, client, wallet) = try makeConnection()
