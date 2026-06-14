@@ -15,6 +15,7 @@ Swift library for Nostr protocol
 - **NIP-40 Expiration**: Disappearing messages via an expiration timestamp, including private DMs
 - **NIP-42 Authentication**: Relay AUTH challenges answered automatically, with auth-required retry
 - **NIP-57 Zaps**: Full Lightning zap flow — sign zap requests (kind 9734), resolve LNURL-pay endpoints, fetch invoices, decode bolt11, and verify kind-9735 zap receipts
+- **NIP-47 Nostr Wallet Connect**: Pay Lightning invoices through a remote wallet over Nostr — the full command set, NIP-44/NIP-04 encryption, notifications, and one-call zap payment (separate `NostrWalletConnect` library)
 - **NIP-19 Entities**: bech32 encoding/decoding of npub, nsec, note, nprofile, nevent, and naddr
 - **NIP-65 Outbox Model**: Per-user read/write relay lists with gossip routing for subscriptions and publishing
 - **Cryptographic Operations**: Schnorr signatures with secp256k1
@@ -117,6 +118,30 @@ try await client.sendDirectMessage("Hello privately!", to: "recipientPubkeyHex")
 
 Reactions (NIP-25), encrypted file messages (kind 15), and disappearing messages (NIP-40) build on the same flow — see [Advanced Usage](https://yysskk.github.io/swift-nostr-client/documentation/nostrclient/advancedusage).
 
+### Pay a zap through a remote wallet (NIP-47)
+
+The `NostrWalletConnect` library pays Lightning invoices through a remote wallet, completing the zap flow that `NostrClient` can only prepare.
+
+```swift
+import NostrWalletConnect
+
+// Connect with the wallet's nostr+walletconnect:// string.
+let connection = WalletConnection(uri: try WalletConnectURI(string: "nostr+walletconnect://..."))
+
+// Pay any invoice and get the preimage back.
+let payment = try await connection.payInvoice("lnbc...")
+print(payment.preimage)
+
+// Or complete a zap end to end: fetch the recipient's invoice and pay it.
+let zap = try await connection.payZap(
+    lnurlPay: lnurlPay,            // resolved LNURLPayResponse
+    amountMillisats: 21_000,
+    zapRequest: zapRequest)        // signed with EventSigner.signZapRequest(...)
+print(zap.preimage)
+```
+
+`get_balance`, `get_info`, `make_invoice`, `lookup_invoice`, `list_transactions`, keysend, and multi-payments are available too, along with a `notifications()` stream.
+
 ## More
 
 Each of these is covered in depth, with worked examples, in the [documentation](https://yysskk.github.io/swift-nostr-client/documentation/nostrclient):
@@ -146,6 +171,7 @@ Each of these is covered in depth, with worked examples, in the [documentation](
 - [x] NIP-40: Expiration timestamp (disappearing messages)
 - [x] NIP-42: Client authentication (automatic challenge response, auth-required retry)
 - [x] NIP-44: Versioned encryption
+- [x] NIP-47: Nostr Wallet Connect (full command set, NIP-44/NIP-04 encryption, notifications, end-to-end zap payment — separate `NostrWalletConnect` library)
 - [x] NIP-57: Lightning Zaps (zap request kind 9734, LNURL helpers, invoice fetch, bolt11 decoding, kind-9735 receipt validation)
 - [x] NIP-59: Gift wrap
 - [x] NIP-65: Relay list metadata (outbox model)
