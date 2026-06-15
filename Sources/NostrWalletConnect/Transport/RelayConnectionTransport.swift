@@ -6,7 +6,7 @@ public import NostrCore
     import FoundationNetworking
 #endif
 
-/// The default ``WalletConnectTransport``, backed by one or more `NostrClient` `RelayConnection`s.
+/// The default ``WalletConnectTransport``, backed by one or more `NostrCore` `RelayConnection`s.
 ///
 /// A wallet connection usually targets a single relay, but a connection URI may list several; this
 /// transport connects to all of them, sends each request to all, and merges their incoming events
