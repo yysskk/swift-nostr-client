@@ -77,6 +77,43 @@ jobs:
           name: coverage-lcov
           path: coverage.lcov
 
+  build-apple-platforms:
+    name: Build (${{ matrix.platform }})
+    runs-on: macos-26
+    strategy:
+      # Report every platform independently instead of stopping at the first failure.
+      fail-fast: false
+      matrix:
+        platform:
+          - iOS
+          - tvOS
+          - watchOS
+          - visionOS
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show Swift version
+        run: swift --version
+
+      # Compile both library products for each Apple platform to catch
+      # platform-specific build breakages the macOS and Linux jobs cannot.
+      # A generic device destination builds the libraries without a simulator
+      # runtime or code signing, and the skip flags keep the build
+      # non-interactive for the secp256k1 build-tool plugin.
+      - name: Build for ${{ matrix.platform }}
+        run: |
+          xcodebuild build \
+            -scheme swift-nostr-client-Package \
+            -destination 'generic/platform=${{ matrix.platform }}' \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            -quiet
+
   build-android:
     runs-on: ubuntu-latest
     steps:
