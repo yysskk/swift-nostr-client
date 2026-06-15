@@ -45,7 +45,8 @@ let custom = try signer.sign(
     UnsignedEvent(pubkey: signer.publicKey, kind: .textNote, content: "gm")
 )
 
-precondition(try note.verify())
+let isValid = try note.verify()
+assert(isValid)
 ```
 
 ## Talk to a Single Relay
