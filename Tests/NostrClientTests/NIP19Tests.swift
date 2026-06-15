@@ -17,7 +17,7 @@ struct NIP19Tests {
 
     @Test("note round-trips through encode/decode")
     func noteRoundTrip() throws {
-        let encoded = NIP19Entity.note(eventIdHex).encoded
+        let encoded = try NIP19Entity.note(eventIdHex).encoded
         #expect(encoded.hasPrefix("note1"))
         #expect(try NIP19Entity.decode(encoded) == .note(eventIdHex))
     }
@@ -44,7 +44,7 @@ struct NIP19Tests {
     @Test("encode nprofile matches canonical vector")
     func encodeNprofileVector() throws {
         let profile = try NProfile(publicKey: pubkeyHex, relays: ["wss://r.x.com", "wss://djbas.sadkb.com"])
-        #expect(profile.encoded == nprofileVector)
+        #expect(try profile.encoded == nprofileVector)
     }
 
     @Test("nprofile round-trips without relays")
@@ -65,7 +65,7 @@ struct NIP19Tests {
             author: pubkeyHex,
             kind: 1
         )
-        let encoded = event.encoded
+        let encoded = try event.encoded
         #expect(encoded.hasPrefix("nevent1"))
 
         let decoded = try NEvent(bech32String: encoded)
@@ -95,7 +95,7 @@ struct NIP19Tests {
             kind: 30023,
             relays: ["wss://relay3.example.com"]
         )
-        let encoded = addr.encoded
+        let encoded = try addr.encoded
         #expect(encoded.hasPrefix("naddr1"))
 
         let decoded = try NAddr(bech32String: encoded)
@@ -178,10 +178,10 @@ struct NIP19Tests {
     }
 
     @Test("naddr missing required author throws invalidNIP19Entity")
-    func naddrMissingAuthorThrows() {
+    func naddrMissingAuthorThrows() throws {
         // TLV with only a type-0 identifier ("abc"); no author or kind.
         let tlv = Data([0x00, 0x03]) + Data("abc".utf8)
-        let encoded = Bech32.encode(hrp: "naddr", data: tlv)
+        let encoded = try Bech32.encode(hrp: "naddr", data: tlv)
         #expect(throws: NostrError.invalidNIP19Entity) {
             _ = try NAddr(bech32String: encoded)
         }
@@ -198,7 +198,7 @@ struct NIP19Tests {
         // type 0 = pubkey (32 bytes), type 9 = unknown 2-byte payload.
         var tlv = Data([0x00, 0x20]) + pubkey
         tlv += Data([0x09, 0x02, 0xAB, 0xCD])
-        let encoded = Bech32.encode(hrp: "nprofile", data: tlv)
+        let encoded = try Bech32.encode(hrp: "nprofile", data: tlv)
 
         guard case .nprofile(let profile) = try NIP19Entity.decode(encoded) else {
             Issue.record("expected nprofile")

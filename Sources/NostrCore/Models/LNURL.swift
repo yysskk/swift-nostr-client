@@ -43,8 +43,8 @@ public enum LNURL {
     }
 
     /// Encodes a URL as a bech32 `lnurl` string, as used in a zap request's `lnurl` tag.
-    public static func encode(_ url: URL) -> String {
-        Bech32.encode(hrp: "lnurl", data: Data(url.absoluteString.utf8))
+    public static func encode(_ url: URL) throws -> String {
+        try Bech32.encode(hrp: "lnurl", data: Data(url.absoluteString.utf8))
     }
 }
 

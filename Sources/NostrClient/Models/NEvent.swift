@@ -72,13 +72,15 @@ public struct NEvent: Sendable, Hashable {
 
     /// The canonical `nevent` bech32 string.
     public var encoded: String {
-        var records = [TLV.specialRecord(hex: eventId)] + TLV.relayRecords(relays)
-        if let author {
-            records.append(TLV.authorRecord(hex: author))
+        get throws {
+            var records = [TLV.specialRecord(hex: eventId)] + TLV.relayRecords(relays)
+            if let author {
+                records.append(TLV.authorRecord(hex: author))
+            }
+            if let kind {
+                records.append(TLV.kindRecord(kind))
+            }
+            return try TLV.bech32(records, prefix: "nevent")
         }
-        if let kind {
-            records.append(TLV.kindRecord(kind))
-        }
-        return TLV.bech32(records, prefix: "nevent")
     }
 }

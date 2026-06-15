@@ -92,12 +92,16 @@ public struct KeyPair: Sendable {
 
     /// Returns the private key as nsec (bech32 encoded)
     public var nsec: String {
-        Bech32.encode(hrp: "nsec", data: privateKey)
+        get throws {
+            try Bech32.encode(hrp: "nsec", data: privateKey)
+        }
     }
 
     /// Returns the public key as npub (bech32 encoded)
     public var npub: String {
-        Bech32.encode(hrp: "npub", data: publicKey)
+        get throws {
+            try Bech32.encode(hrp: "npub", data: publicKey)
+        }
     }
 }
 
@@ -139,6 +143,8 @@ public struct PublicKey: Sendable, Hashable {
 
     /// Returns the public key as npub (bech32 encoded)
     public var npub: String {
-        Bech32.encode(hrp: "npub", data: data)
+        get throws {
+            try Bech32.encode(hrp: "npub", data: data)
+        }
     }
 }

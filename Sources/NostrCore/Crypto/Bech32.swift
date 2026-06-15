@@ -13,8 +13,14 @@ public enum Bech32 {
         return map
     }()
 
-    /// Encodes data with the given human-readable prefix
-    public static func encode(hrp: String, data: Data) -> String {
+    /// Encodes data with the given human-readable prefix.
+    /// - Throws: ``NostrError/invalidBech32`` if `hrp` is not ASCII.
+    public static func encode(hrp: String, data: Data) throws -> String {
+        // The HRP must be ASCII: `hrpExpand` (used by the checksum) reads each
+        // character's `asciiValue`, so a non-ASCII HRP would otherwise trap.
+        guard hrp.allSatisfy(\.isASCII) else {
+            throw NostrError.invalidBech32
+        }
         let values = convertBits(from: 8, to: 5, data: Array(data), pad: true)
         let checksum = createChecksum(hrp: hrp, values: values)
         let combined = values + checksum

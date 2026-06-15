@@ -102,7 +102,9 @@ public actor NostrClient {
 
     /// Returns the npub if a signer is set
     public var npub: String? {
-        signer?.npub
+        get throws {
+            try signer?.npub
+        }
     }
 
     /// Runs `body` with the configured signer, throwing ``NostrError/signerNotSet`` if none is set.

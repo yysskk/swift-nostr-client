@@ -229,7 +229,7 @@ let profile = try NProfile(
     publicKey: "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
     relays: ["wss://relay.example.com"]
 )
-let nprofile = profile.encoded
+let nprofile = try profile.encoded
 
 // Event reference (nevent) built from a fetched event
 let nevent = try NEvent(event: event, relays: ["wss://relay.example.com"]).encoded

@@ -45,19 +45,21 @@ public enum NIP19Entity: Sendable, Hashable {
 
     /// The canonical bech32-encoded string for this entity.
     public var encoded: String {
-        switch self {
-        case .npub(let hex):
-            return Bech32.encode(hrp: "npub", data: Data(hexString: hex) ?? Data())
-        case .nsec(let hex):
-            return Bech32.encode(hrp: "nsec", data: Data(hexString: hex) ?? Data())
-        case .note(let hex):
-            return Bech32.encode(hrp: "note", data: Data(hexString: hex) ?? Data())
-        case .nprofile(let profile):
-            return profile.encoded
-        case .nevent(let event):
-            return event.encoded
-        case .naddr(let addr):
-            return addr.encoded
+        get throws {
+            switch self {
+            case .npub(let hex):
+                return try Bech32.encode(hrp: "npub", data: Data(hexString: hex) ?? Data())
+            case .nsec(let hex):
+                return try Bech32.encode(hrp: "nsec", data: Data(hexString: hex) ?? Data())
+            case .note(let hex):
+                return try Bech32.encode(hrp: "note", data: Data(hexString: hex) ?? Data())
+            case .nprofile(let profile):
+                return try profile.encoded
+            case .nevent(let event):
+                return try event.encoded
+            case .naddr(let addr):
+                return try addr.encoded
+            }
         }
     }
 }

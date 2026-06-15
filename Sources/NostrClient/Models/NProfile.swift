@@ -47,6 +47,8 @@ public struct NProfile: Sendable, Hashable {
 
     /// The canonical `nprofile` bech32 string.
     public var encoded: String {
-        TLV.bech32([TLV.specialRecord(hex: publicKey)] + TLV.relayRecords(relays), prefix: "nprofile")
+        get throws {
+            try TLV.bech32([TLV.specialRecord(hex: publicKey)] + TLV.relayRecords(relays), prefix: "nprofile")
+        }
     }
 }

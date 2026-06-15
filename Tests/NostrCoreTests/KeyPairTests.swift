@@ -27,7 +27,7 @@ struct KeyPairTests {
     @Test("Bech32 encoding nsec")
     func bech32Nsec() throws {
         let keyPair = try KeyPair()
-        let nsec = keyPair.nsec
+        let nsec = try keyPair.nsec
 
         #expect(nsec.hasPrefix("nsec1"))
 
@@ -39,7 +39,7 @@ struct KeyPairTests {
     @Test("Bech32 encoding npub")
     func bech32Npub() throws {
         let keyPair = try KeyPair()
-        let npub = keyPair.npub
+        let npub = try keyPair.npub
 
         #expect(npub.hasPrefix("npub1"))
 
