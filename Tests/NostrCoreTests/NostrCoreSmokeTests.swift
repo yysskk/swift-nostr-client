@@ -1,6 +1,5 @@
+import NostrCore
 import Testing
-
-@testable import NostrCore
 
 @Suite("NostrCore Module")
 struct NostrCoreSmokeTests {
@@ -9,6 +8,6 @@ struct NostrCoreSmokeTests {
     /// module in subsequent changes.
     @Test("module builds and links")
     func moduleBuildsAndLinks() {
-        #expect(Bool(true))
+        #expect(true)
     }
 }
