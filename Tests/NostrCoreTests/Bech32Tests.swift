@@ -10,7 +10,7 @@ struct Bech32Tests {
         let publicKeyHex = "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e"
         let publicKeyData = Data(hexString: publicKeyHex)!
 
-        let encoded = Bech32.encode(hrp: "npub", data: publicKeyData)
+        let encoded = try Bech32.encode(hrp: "npub", data: publicKeyData)
         #expect(encoded.hasPrefix("npub1"))
 
         let (hrp, decoded) = try Bech32.decode(encoded)
@@ -23,7 +23,7 @@ struct Bech32Tests {
         let privateKeyHex = "e8f32e723decf4051aefac8e2c93c9c5b214313817cdb01a1494b917c8436b35"
         let privateKeyData = Data(hexString: privateKeyHex)!
 
-        let encoded = Bech32.encode(hrp: "nsec", data: privateKeyData)
+        let encoded = try Bech32.encode(hrp: "nsec", data: privateKeyData)
         #expect(encoded.hasPrefix("nsec1"))
 
         let (hrp, decoded) = try Bech32.decode(encoded)
@@ -66,12 +66,12 @@ struct Bech32Tests {
         let keyPair = try KeyPair()
 
         // Test nsec round trip
-        let nsec = keyPair.nsec
+        let nsec = try keyPair.nsec
         let recreatedFromNsec = try KeyPair(nsec: nsec)
         #expect(recreatedFromNsec.privateKeyHex == keyPair.privateKeyHex)
 
         // Test npub round trip
-        let npub = keyPair.npub
+        let npub = try keyPair.npub
         let publicKey = try PublicKey(npub: npub)
         #expect(publicKey.hex == keyPair.publicKeyHex)
     }

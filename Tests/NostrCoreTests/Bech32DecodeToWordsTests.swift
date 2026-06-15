@@ -7,7 +7,7 @@ struct Bech32DecodeToWordsTests {
     @Test("round-trips data through encode and decodeToWords")
     func roundTrip() throws {
         let data = Data([0x00, 0x01, 0x02, 0xff, 0xab])
-        let encoded = Bech32.encode(hrp: "npub", data: data)
+        let encoded = try Bech32.encode(hrp: "npub", data: data)
 
         let (hrp, words) = try Bech32.decodeToWords(encoded)
         #expect(hrp == "npub")

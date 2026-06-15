@@ -70,10 +70,12 @@ public struct NAddr: Sendable, Hashable {
 
     /// The canonical `naddr` bech32 string.
     public var encoded: String {
-        let records =
-            [TLV.specialRecord(Data(identifier.utf8))]
-            + TLV.relayRecords(relays)
-            + [TLV.authorRecord(hex: author), TLV.kindRecord(kind)]
-        return TLV.bech32(records, prefix: "naddr")
+        get throws {
+            let records =
+                [TLV.specialRecord(Data(identifier.utf8))]
+                + TLV.relayRecords(relays)
+                + [TLV.authorRecord(hex: author), TLV.kindRecord(kind)]
+            return try TLV.bech32(records, prefix: "naddr")
+        }
     }
 }

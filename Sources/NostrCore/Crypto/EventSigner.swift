@@ -29,7 +29,9 @@ public struct EventSigner: Sendable {
 
     /// The public key as npub
     public var npub: String {
-        keyPair.npub
+        get throws {
+            try keyPair.npub
+        }
     }
 
     /// Signs an unsigned event and returns a complete signed event
