@@ -101,7 +101,10 @@ enum TLV {
 
     /// Validates that an event kind fits in a 32-bit unsigned integer.
     static func validatedKind(_ kind: Int) throws -> Int {
-        guard (0...0xFFFF_FFFF).contains(kind) else {
+        // `UInt32(exactly:)` rejects negative values and values above `UInt32.max`
+        // without relying on an `Int` literal that would overflow on 32-bit
+        // platforms such as watchOS.
+        guard UInt32(exactly: kind) != nil else {
             throw NostrError.invalidNIP19Entity
         }
         return kind

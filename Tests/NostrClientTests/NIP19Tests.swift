@@ -132,6 +132,34 @@ struct NIP19Tests {
         #expect(addr.kind == 30023)
     }
 
+    // MARK: - kind validation
+
+    @Test("a kind of zero and a typical kind are valid")
+    func validatedKindAcceptsInRange() throws {
+        #expect(try TLV.validatedKind(0) == 0)
+        #expect(try TLV.validatedKind(30023) == 30023)
+    }
+
+    @Test("a negative kind throws invalidNIP19Entity")
+    func validatedKindRejectsNegative() {
+        #expect(throws: NostrError.invalidNIP19Entity) {
+            _ = try TLV.validatedKind(-1)
+        }
+    }
+
+    @Test("the maximum 32-bit kind is valid and larger kinds throw")
+    func validatedKindUpperBound() throws {
+        // Values above Int32.max only fit in `Int` on 64-bit platforms; on 32-bit
+        // targets such as watchOS the argument cannot exceed `UInt32.max`, so this
+        // boundary is unreachable there.
+        guard Int.bitWidth >= 64 else { return }
+        let maxKind = Int(UInt32.max)
+        #expect(try TLV.validatedKind(maxKind) == maxKind)
+        #expect(throws: NostrError.invalidNIP19Entity) {
+            _ = try TLV.validatedKind(maxKind + 1)
+        }
+    }
+
     // MARK: - error handling
 
     @Test("decoding with the wrong prefix throws unknownPrefix")
