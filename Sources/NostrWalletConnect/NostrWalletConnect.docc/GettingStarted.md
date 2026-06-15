@@ -66,6 +66,7 @@ let (data, _) = try await URLSession.shared.data(from: serviceURL)
 let lnurlPay = try JSONDecoder().decode(LNURLPayResponse.self, from: data)
 
 // Sign a zap request (kind 9734) — it is not published to relays.
+let keyPair = try KeyPair(nsec: "nsec1...")   // the zapping user's key
 let signer = EventSigner(keyPair: keyPair)
 let zapRequest = try signer.signZapRequest(
     recipientPubkey: "recipientPubkeyHex",
