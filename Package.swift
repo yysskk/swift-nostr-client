@@ -49,6 +49,7 @@ let package = Package(
             name: "NostrWalletConnect",
             dependencies: [
                 "NostrClient",
+                "NostrCore",
                 .product(name: "P256K", package: "swift-secp256k1"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
@@ -60,11 +61,11 @@ let package = Package(
         ),
         .testTarget(
             name: "NostrClientTests",
-            dependencies: ["NostrClient"]
+            dependencies: ["NostrClient", "NostrCore"]
         ),
         .testTarget(
             name: "NostrWalletConnectTests",
-            dependencies: ["NostrWalletConnect"]
+            dependencies: ["NostrWalletConnect", "NostrCore"]
         ),
     ]
 )

@@ -32,7 +32,7 @@ public enum Bech32 {
     ///
     /// Useful for formats whose data is not byte-aligned and so cannot survive the 5→8 bit
     /// conversion, such as BOLT-11 Lightning invoices.
-    static func decodeToWords(_ str: String) throws -> (hrp: String, words: [UInt8]) {
+    public static func decodeToWords(_ str: String) throws -> (hrp: String, words: [UInt8]) {
         let lowercased = str.lowercased()
 
         guard let separatorIndex = lowercased.lastIndex(of: "1") else {
@@ -64,7 +64,7 @@ public enum Bech32 {
     }
 
     /// Regroups 5-bit bech32 words into 8-bit bytes, dropping any partial trailing bits.
-    static func wordsToBytes(_ words: [UInt8]) -> [UInt8] {
+    public static func wordsToBytes(_ words: [UInt8]) -> [UInt8] {
         convertBits(from: 5, to: 8, data: words, pad: false)
     }
 
