@@ -23,7 +23,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: swift-nostr-client version
+      description: swift-nostr version
       placeholder: e.g., 0.1.0
     validations:
       required: true
