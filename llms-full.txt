@@ -1,6 +1,6 @@
-# swift-nostr-client: Complete Documentation
+# swift-nostr: Complete Documentation
 
-> swift-nostr-client is a modern Swift toolkit for Nostr protocol. It vends three libraries: `NostrCore` (protocol primitives, signing, NIP-44 encryption, NIP-19 encoding, and relay transport), the high-level `NostrClient` (multi-relay pools, NIP-65 outbox routing, and NIP-17 private direct messages), and `NostrWalletConnect` (NIP-47 wallet payments). All types are `Sendable` for Swift concurrency. MIT licensed.
+> swift-nostr is a modern Swift toolkit for Nostr protocol. It vends three libraries: `NostrCore` (protocol primitives, signing, NIP-44 encryption, NIP-19 encoding, and relay transport), the high-level `NostrClient` (multi-relay pools, NIP-65 outbox routing, and NIP-17 private direct messages), and `NostrWalletConnect` (NIP-47 wallet payments). All types are `Sendable` for Swift concurrency. MIT licensed.
 
 ## Installation
 
@@ -8,7 +8,7 @@ Add the package dependency in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yysskk/swift-nostr-client", from: "1.0.0")
+    .package(url: "https://github.com/yysskk/swift-nostr", from: "1.0.0")
 ]
 ```
 
@@ -823,6 +823,6 @@ Cases: `invalidPrivateKey`, `invalidPublicKey`, `invalidSignature`, `invalidEven
 
 ## Links
 
-- GitHub: https://github.com/yysskk/swift-nostr-client
-- API Documentation: https://yysskk.github.io/swift-nostr-client/documentation/nostrclient
+- GitHub: https://github.com/yysskk/swift-nostr
+- API Documentation: https://yysskk.github.io/swift-nostr/documentation/nostrclient
 - License: MIT
